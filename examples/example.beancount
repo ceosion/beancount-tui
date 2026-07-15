@@ -1,0 +1,36 @@
+;; Example ledger for trying out beancount-tui.
+
+option "title" "Example Ledger"
+option "operating_currency" "USD"
+
+2026-01-01 open Assets:Checking          USD
+2026-01-01 open Assets:Savings           USD
+2026-01-01 open Income:Salary            USD
+2026-01-01 open Expenses:Food:Groceries  USD
+2026-01-01 open Expenses:Food:Restaurant USD
+2026-01-01 open Expenses:Rent            USD
+2026-01-01 open Equity:Opening-Balances  USD
+
+2026-01-01 * "Opening balance"
+  Assets:Checking           2500.00 USD
+  Equity:Opening-Balances
+
+2026-01-05 * "Acme Corp" "Salary"
+  Assets:Checking           4200.00 USD
+  Income:Salary
+
+2026-01-06 * "Green Grocer" "Weekly groceries"
+  Expenses:Food:Groceries     87.35 USD
+  Assets:Checking
+
+2026-01-10 * "Landlord" "January rent"
+  Expenses:Rent             1450.00 USD
+  Assets:Checking
+
+2026-01-14 * "Nice Restaurant" "Dinner with friends"
+  Expenses:Food:Restaurant    64.20 USD
+  Assets:Checking
+
+2026-01-15 * "Transfer to savings"
+  Assets:Savings            1000.00 USD
+  Assets:Checking
