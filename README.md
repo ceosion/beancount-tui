@@ -24,6 +24,20 @@ Requires Python 3.11+.
 uv sync            # install dependencies (or: pip install -e .)
 ```
 
+### Platforms without prebuilt beancount wheels
+
+`beancount` ships wheels for common Linux/macOS/Windows targets. On other
+platforms — e.g. Android under [Termux](https://termux.dev/) — it is built
+from source, which needs a C compiler plus `flex` and `bison`:
+
+```sh
+pkg install clang flex bison    # Termux
+```
+
+(The dependency is capped at `beancount<3.2.1` because later releases can
+only be built from source via the `flex-bin`/`bison-bin` packages, which
+don't support these platforms.)
+
 ## Usage
 
 ```sh
