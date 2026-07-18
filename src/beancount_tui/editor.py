@@ -76,3 +76,17 @@ def replace_entry(entry: data.Directive, new_text: str) -> None:
     replacement = [line + "\n" for line in new_text.rstrip("\n").split("\n")]
     lines[start : start + span] = replacement
     path.write_text("".join(lines), encoding="utf-8")
+
+
+def delete_entry(entry: data.Directive) -> None:
+    """Remove ``entry``'s source lines from its source file."""
+    filename = entry.meta["filename"]
+    lineno = entry.meta["lineno"]
+    path = Path(filename)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    start = lineno - 1
+    end = start + entry_line_span(lines, start)
+    if end < len(lines) and not lines[end].strip():
+        end += 1  # take the separating blank line with the entry
+    del lines[start:end]
+    path.write_text("".join(lines), encoding="utf-8")

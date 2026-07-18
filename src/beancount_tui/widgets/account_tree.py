@@ -31,7 +31,8 @@ class AccountTree(Tree[str]):
     def _add_children(self, node: TreeNode, real_account: realization.RealAccount) -> None:
         for name in sorted(real_account):
             child = real_account[name]
-            balance = child.balance.reduce(lambda pos: pos.units)
+            # Cumulative balance: the account's own postings plus all children.
+            balance = realization.compute_balance(child).reduce(lambda pos: pos.units)
             positions = sorted(balance, key=lambda pos: pos.units.currency)
             amounts = ", ".join(
                 f"{pos.units.number:,} {pos.units.currency}" for pos in positions

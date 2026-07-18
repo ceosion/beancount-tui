@@ -3,6 +3,7 @@ import pytest
 from beancount_tui.editor import (
     TransactionParseError,
     append_transaction,
+    delete_entry,
     entry_line_span,
     parse_transaction_text,
     replace_entry,
@@ -67,3 +68,23 @@ def test_replace_entry(ledger_path):
     rent = ledger.transactions_for_account("Expenses:Rent")[0]
     assert rent.narration == "January rent (corrected)"
     assert str(rent.postings[0].units.number) == "1500.00"
+
+
+def test_delete_entry(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    rent = ledger.transactions_for_account("Expenses:Rent")[0]
+    delete_entry(rent)
+    ledger.reload()
+    assert not ledger.errors
+    assert len(ledger.transactions) == 5
+    assert not ledger.transactions_for_account("Expenses:Rent")
+    # The entry's separating blank line goes with it — no doubled blanks left.
+    assert "\n\n\n" not in ledger_path.read_text()
+
+
+def test_delete_last_entry_in_file(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    delete_entry(ledger.transactions[-1])
+    ledger.reload()
+    assert not ledger.errors
+    assert len(ledger.transactions) == 5

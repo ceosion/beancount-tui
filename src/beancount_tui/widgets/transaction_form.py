@@ -59,6 +59,7 @@ class TransactionForm(ModalScreen[str | None]):
         self,
         *,
         date: str | None = None,
+        flag: str = "*",
         payee: str = "",
         narration: str = "",
         postings_text: str = "",
@@ -66,6 +67,7 @@ class TransactionForm(ModalScreen[str | None]):
     ) -> None:
         super().__init__()
         self._date = date or datetime.date.today().isoformat()
+        self._flag = flag
         self._payee = payee
         self._narration = narration
         self._postings_text = postings_text
@@ -76,6 +78,8 @@ class TransactionForm(ModalScreen[str | None]):
             yield Label(f"[b]{self._title}[/b]")
             yield Label("Date", classes="field-label")
             yield Input(value=self._date, id="date", placeholder="YYYY-MM-DD")
+            yield Label("Flag (* = cleared, ! = pending)", classes="field-label")
+            yield Input(value=self._flag, id="flag")
             yield Label("Payee", classes="field-label")
             yield Input(value=self._payee, id="payee", placeholder="(optional)")
             yield Label("Narration", classes="field-label")
@@ -89,12 +93,13 @@ class TransactionForm(ModalScreen[str | None]):
 
     def _assemble_text(self) -> str:
         date = self.query_one("#date", Input).value.strip()
+        flag = self.query_one("#flag", Input).value.strip() or "*"
         payee = self.query_one("#payee", Input).value.strip()
         narration = self.query_one("#narration", Input).value.strip()
         postings = self.query_one("#postings", TextArea).text
 
         quoted_payee = f' "{payee}"' if payee else ""
-        header = f'{date} *{quoted_payee} "{narration}"'
+        header = f'{date} {flag}{quoted_payee} "{narration}"'
         body = "\n".join(
             "  " + line.strip() for line in postings.splitlines() if line.strip()
         )
