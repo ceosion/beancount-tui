@@ -43,6 +43,16 @@ class Ledger:
         """All account names that appear in the ledger, sorted."""
         return sorted(getters.get_accounts(self.entries))
 
+    @property
+    def files(self) -> list[Path]:
+        """All source files of the ledger: the top-level file, then includes.
+
+        Beancount records every processed file in ``options["include"]``.
+        """
+        top = self.path.resolve()
+        included = {Path(name).resolve() for name in self.options.get("include", [])}
+        return [top] + sorted(f for f in included if f != top)
+
     def transactions_for_account(self, account: str | None) -> list[data.Transaction]:
         """Transactions posting to ``account`` or any of its sub-accounts."""
         if account is None:

@@ -28,6 +28,20 @@ def test_transaction_amount(ledger_path):
     assert transaction_amount(rent) == "1450.00 USD"
 
 
+def test_files_single_file(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.files == [ledger_path.resolve()]
+
+
+def test_files_lists_includes_after_top_level(multi_ledger_path):
+    ledger = Ledger.load(multi_ledger_path)
+    assert not ledger.errors
+    assert ledger.files == [
+        multi_ledger_path.resolve(),
+        (multi_ledger_path.parent / "food.beancount").resolve(),
+    ]
+
+
 def test_filter_transactions_by_text(ledger_path):
     ledger = Ledger.load(ledger_path)
     txns = ledger.transactions

@@ -16,7 +16,7 @@ from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.filter_bar import FilterBar
-from beancount_tui.widgets.transaction_form import TransactionForm
+from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
 
 
@@ -133,13 +133,13 @@ class BeancountTUI(App):
         self.notify("Ledger reloaded.")
 
     def action_new_transaction(self) -> None:
-        def on_result(text: str | None) -> None:
-            if text is None:
+        def on_result(result: TransactionFormResult | None) -> None:
+            if result is None:
                 return
-            append_transaction(self.ledger.path, text)
+            append_transaction(result.filename or self.ledger.path, result.text)
             self.action_reload()
 
-        self.push_screen(TransactionForm(), on_result)
+        self.push_screen(TransactionForm(files=self.ledger.files), on_result)
 
     def action_edit_transaction(self) -> None:
         txn = self.query_one(TransactionTable).selected_transaction
@@ -147,10 +147,10 @@ class BeancountTUI(App):
             self.notify("No transaction selected.", severity="warning")
             return
 
-        def on_result(text: str | None) -> None:
-            if text is None:
+        def on_result(result: TransactionFormResult | None) -> None:
+            if result is None:
                 return
-            replace_entry(txn, text)
+            replace_entry(txn, result.text)
             self.action_reload()
 
         self.push_screen(_edit_form(txn), on_result)

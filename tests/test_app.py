@@ -1,5 +1,7 @@
 """End-to-end smoke tests driving the Textual app."""
 
+from textual.widgets import Select
+
 from beancount_tui.app import BeancountTUI
 from beancount_tui.editor import append_transaction
 from beancount_tui.ledger import Ledger
@@ -125,6 +127,64 @@ async def test_delete_cancelled_keeps_transaction(ledger_path):
         assert app.query_one(TransactionTable).row_count == 6
 
     assert len(Ledger.load(ledger_path).transactions) == 6
+
+
+async def test_single_file_form_has_no_file_picker(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert not form.query("#target-file")
+
+
+async def test_new_transaction_into_included_file(multi_ledger_path):
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  4.50 USD\nAssets:Checking"
+        )
+        form.query_one("#target-file", Select).value = str(food)
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+        assert app.query_one(TransactionTable).row_count == 3
+
+    assert "Corner Cafe" in food.read_text()
+    ledger = Ledger.load(multi_ledger_path)
+    assert not ledger.errors
+    assert len(ledger.transactions) == 3
+
+
+async def test_edit_transaction_in_included_file_writes_in_place(multi_ledger_path):
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Row 1 is the groceries transaction, which lives in food.beancount.
+        app.query_one(TransactionTable).move_cursor(row=1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#narration").value == "Weekly groceries"
+
+        form.query_one("#narration").value = "Weekly groceries (edited)"
+        form._save()
+        await pilot.pause()
+
+    assert "Weekly groceries (edited)" in food.read_text()
+    assert "edited" not in multi_ledger_path.read_text()
 
 
 async def test_filter_via_filter_bar(ledger_path):

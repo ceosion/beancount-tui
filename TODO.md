@@ -22,7 +22,7 @@ features.
 
 - [x] **Search / filter.** Filter the transaction table by payee, narration,
   or date range (e.g. a `/` binding opening a filter input).
-- [ ] **Multi-file ledgers.** `replace_entry` already writes to the correct
+- [x] **Multi-file ledgers.** `replace_entry` already writes to the correct
   file via the entry's `filename` metadata, but new transactions are always
   appended to the top-level file. Let the user pick the target file when the
   ledger uses `include` directives.
