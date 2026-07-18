@@ -5,6 +5,7 @@ from beancount_tui.editor import append_transaction
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
+from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -124,6 +125,42 @@ async def test_delete_cancelled_keeps_transaction(ledger_path):
         assert app.query_one(TransactionTable).row_count == 6
 
     assert len(Ledger.load(ledger_path).transactions) == 6
+
+
+async def test_filter_via_filter_bar(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        bar = app.query_one(FilterBar)
+        assert bar.has_class("visible")
+        assert bar.has_focus
+
+        await pilot.press(*"grocer")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Green Grocer"
+
+        # Escape drops the filter and hides the bar.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert table.row_count == 6
+        assert not bar.has_class("visible")
+
+
+async def test_filter_combines_with_account_selection(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Expenses:Food"
+        await pilot.press("/")
+        await pilot.press(*"dinner")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Nice Restaurant"
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

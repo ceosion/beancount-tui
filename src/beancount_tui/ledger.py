@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -56,6 +57,52 @@ class Ledger:
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""
         return realization.realize(self.entries)
+
+
+def filter_transactions(
+    transactions: list[data.Transaction], query: str
+) -> list[data.Transaction]:
+    """Filter transactions by payee/narration text or by date range.
+
+    A query of the form ``START..END`` — ISO dates, either side optional
+    (``2026-01-01..2026-01-31``, ``2026-01-15..``, ``..2026-01-10``) —
+    selects a date range, inclusive on both ends. Any other query is a
+    case-insensitive substring match against payee and narration.
+    """
+    query = query.strip()
+    if not query:
+        return transactions
+    date_range = _parse_date_range(query)
+    if date_range is not None:
+        start, end = date_range
+        return [
+            txn
+            for txn in transactions
+            if (start is None or txn.date >= start) and (end is None or txn.date <= end)
+        ]
+    needle = query.lower()
+    return [
+        txn
+        for txn in transactions
+        if needle in (txn.payee or "").lower() or needle in (txn.narration or "").lower()
+    ]
+
+
+def _parse_date_range(
+    query: str,
+) -> tuple[datetime.date | None, datetime.date | None] | None:
+    """Parse ``START..END`` into dates, or ``None`` if it isn't a date range."""
+    if ".." not in query:
+        return None
+    start_text, _, end_text = query.partition("..")
+    try:
+        start = datetime.date.fromisoformat(start_text.strip()) if start_text.strip() else None
+        end = datetime.date.fromisoformat(end_text.strip()) if end_text.strip() else None
+    except ValueError:
+        return None
+    if start is None and end is None:
+        return None
+    return start, end
 
 
 def transaction_amount(txn: data.Transaction) -> str:

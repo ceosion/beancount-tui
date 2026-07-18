@@ -1,6 +1,6 @@
 from decimal import Decimal
 
-from beancount_tui.ledger import Ledger, transaction_amount
+from beancount_tui.ledger import Ledger, filter_transactions, transaction_amount
 
 
 def test_load_example(ledger_path):
@@ -26,6 +26,29 @@ def test_transaction_amount(ledger_path):
     ledger = Ledger.load(ledger_path)
     rent = ledger.transactions_for_account("Expenses:Rent")[0]
     assert transaction_amount(rent) == "1450.00 USD"
+
+
+def test_filter_transactions_by_text(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    txns = ledger.transactions
+    assert [t.payee for t in filter_transactions(txns, "grocer")] == ["Green Grocer"]
+    assert [t.narration for t in filter_transactions(txns, "RENT")] == ["January rent"]
+    assert filter_transactions(txns, "") == txns
+    assert filter_transactions(txns, "no such thing") == []
+
+
+def test_filter_transactions_by_date_range(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    txns = ledger.transactions
+    ranged = filter_transactions(txns, "2026-01-05..2026-01-10")
+    assert [str(t.date) for t in ranged] == ["2026-01-05", "2026-01-06", "2026-01-10"]
+    assert len(filter_transactions(txns, "2026-01-14..")) == 2
+    assert len(filter_transactions(txns, "..2026-01-01")) == 1
+
+
+def test_filter_transactions_invalid_range_falls_back_to_text(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert filter_transactions(ledger.transactions, "not..a-date") == []
 
 
 def test_root_account_has_balances(ledger_path):

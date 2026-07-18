@@ -20,7 +20,7 @@ features.
 
 ## Features
 
-- [ ] **Search / filter.** Filter the transaction table by payee, narration,
+- [x] **Search / filter.** Filter the transaction table by payee, narration,
   or date range (e.g. a `/` binding opening a filter input).
 - [ ] **Multi-file ledgers.** `replace_entry` already writes to the correct
   file via the entry's `filename` metadata, but new transactions are always
