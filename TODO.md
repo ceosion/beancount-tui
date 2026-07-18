@@ -41,6 +41,6 @@ features.
 
 ## Tooling
 
-- [ ] **CI.** Add a GitHub Actions workflow running `uv run pytest` and
+- [x] **CI.** Add a GitHub Actions workflow running `uv run pytest` and
   `uv run ruff check .` — the repo currently has no CI.
 - [ ] **Type checking.** Add mypy or pyright to the dev group and CI.
