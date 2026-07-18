@@ -11,9 +11,10 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
-from beancount_tui.editor import append_transaction, format_entry, replace_entry
+from beancount_tui.editor import append_transaction, delete_entry, format_entry, replace_entry
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
+from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -45,6 +46,7 @@ class BeancountTUI(App):
     BINDINGS = [
         ("n", "new_transaction", "New"),
         ("e", "edit_transaction", "Edit"),
+        ("d", "delete_transaction", "Delete"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
     ]
@@ -122,6 +124,24 @@ class BeancountTUI(App):
 
         self.push_screen(_edit_form(txn), on_result)
 
+    def action_delete_transaction(self) -> None:
+        txn = self.query_one(TransactionTable).selected_transaction
+        if txn is None:
+            self.notify("No transaction selected.", severity="warning")
+            return
+
+        def on_result(confirmed: bool | None) -> None:
+            if not confirmed:
+                return
+            delete_entry(txn)
+            self.action_reload()
+
+        summary = " ".join(part for part in (str(txn.date), txn.payee, txn.narration) if part)
+        self.push_screen(
+            ConfirmDialog(f"Delete transaction {summary}?", confirm_label="Delete"),
+            on_result,
+        )
+
 
 def _edit_form(txn: data.Transaction) -> TransactionForm:
     """Build a form pre-filled from an existing transaction."""
@@ -129,6 +149,7 @@ def _edit_form(txn: data.Transaction) -> TransactionForm:
     postings_text = "\n".join(line.strip() for line in lines[1:])
     return TransactionForm(
         date=txn.date.isoformat(),
+        flag=txn.flag,
         payee=txn.payee or "",
         narration=txn.narration or "",
         postings_text=postings_text,

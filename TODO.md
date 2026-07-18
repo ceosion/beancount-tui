@@ -6,14 +6,14 @@ features.
 
 ## Known scaffold limitations
 
-- [ ] **Preserve/choose the transaction flag in the form.** The form always
+- [x] **Preserve/choose the transaction flag in the form.** The form always
   saves with flag `*`, so editing a `!` (pending) transaction silently
   normalizes it to `*`. Add a flag field (or toggle) to `TransactionForm`
   and prefill it on edit.
-- [ ] **Delete transactions.** There is no way to remove a transaction from
+- [x] **Delete transactions.** There is no way to remove a transaction from
   the UI. Add a `d` binding with a confirmation prompt; the write side can
   reuse `entry_line_span` to splice out the entry's source lines.
-- [ ] **Cumulative balances in the account tree.** The sidebar shows each
+- [x] **Cumulative balances in the account tree.** The sidebar shows each
   account's own balance, not the roll-up of its children (e.g.
   `Expenses:Food` shows nothing even when its sub-accounts have activity).
   Use `realization.compute_balance` for parent nodes.
