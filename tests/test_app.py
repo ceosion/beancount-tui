@@ -368,6 +368,45 @@ async def test_delete_directive_with_confirmation(ledger_path):
     assert not Ledger.load(ledger_path).errors
 
 
+EXTERNAL_TXN = (
+    '2026-01-21 * "External Editor" "Written outside the app"\n'
+    "  Expenses:Food:Groceries  5.00 USD\n"
+    "  Assets:Checking\n"
+)
+
+
+async def test_auto_reload_on_external_change(ledger_path):
+    app = BeancountTUI(ledger_path, watch_interval=0.05)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+        append_transaction(ledger_path, EXTERNAL_TXN)
+        await pilot.pause(0.5)
+
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 7
+        assert table.shown[-1].payee == "External Editor"
+
+
+async def test_no_auto_reload_while_modal_open(ledger_path):
+    app = BeancountTUI(ledger_path, watch_interval=0.05)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, TransactionForm)
+
+        append_transaction(ledger_path, EXTERNAL_TXN)
+        await pilot.pause(0.5)
+        # The open form blocks the reload...
+        assert app.query_one(TransactionTable).row_count == 6
+
+        await pilot.press("escape")
+        await pilot.pause(0.5)
+        # ...and it happens once the form closes.
+        assert app.query_one(TransactionTable).row_count == 7
+
+
 async def test_account_tree_rolls_up_child_balances(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

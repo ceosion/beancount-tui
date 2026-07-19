@@ -75,6 +75,16 @@ class Ledger:
         included = {Path(name).resolve() for name in self.options.get("include", [])}
         return [top] + sorted(f for f in included if f != top)
 
+    def file_mtimes(self) -> dict[Path, float]:
+        """Modification times of all source files, for change detection."""
+        mtimes = {}
+        for file in self.files:
+            try:
+                mtimes[file] = file.stat().st_mtime
+            except OSError:
+                mtimes[file] = -1.0
+        return mtimes
+
     def transactions_for_account(self, account: str | None) -> list[data.Transaction]:
         """Transactions posting to ``account`` or any of its sub-accounts."""
         if account is None:

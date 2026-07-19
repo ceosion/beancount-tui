@@ -62,12 +62,14 @@ class BeancountTUI(App):
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, ledger_path: str | Path) -> None:
+    def __init__(self, ledger_path: str | Path, watch_interval: float = 1.0) -> None:
         super().__init__()
         self.ledger = Ledger.load(ledger_path)
         self.selected_account: str | None = None
         self.filter_query: str = ""
         self.show_directives: bool = False
+        self._watch_interval = watch_interval
+        self._watched_mtimes = self.ledger.file_mtimes()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -82,6 +84,7 @@ class BeancountTUI(App):
     def on_mount(self) -> None:
         self.sub_title = str(self.ledger.path)
         self.refresh_views()
+        self.set_interval(self._watch_interval, self._check_external_changes)
 
     def _visible_entries(self) -> list[data.Directive]:
         if self.show_directives:
@@ -139,8 +142,21 @@ class BeancountTUI(App):
 
     def action_reload(self) -> None:
         self.ledger.reload()
+        self._watched_mtimes = self.ledger.file_mtimes()
         self.refresh_views()
         self.notify("Ledger reloaded.")
+
+    def _check_external_changes(self) -> None:
+        # Leave the ledger alone while a modal (form/dialog) is open: a reload
+        # under an in-progress edit would let it write back to stale locations.
+        if len(self.screen_stack) > 1:
+            return
+        current = self.ledger.file_mtimes()
+        if current != self._watched_mtimes:
+            self.ledger.reload()
+            self._watched_mtimes = self.ledger.file_mtimes()
+            self.refresh_views()
+            self.notify("Ledger changed on disk; reloaded.")
 
     def action_new_transaction(self) -> None:
         def on_result(result: TransactionFormResult | None) -> None:
