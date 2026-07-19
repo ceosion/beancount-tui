@@ -11,6 +11,7 @@ from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
@@ -225,6 +226,39 @@ async def test_filter_combines_with_account_selection(ledger_path):
         table = app.query_one(TransactionTable)
         assert table.row_count == 1
         assert table.shown[0].payee == "Nice Restaurant"
+
+
+async def test_account_completion_in_postings(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        area = app.screen.query_one("#postings", PostingsArea)
+        area.focus()
+
+        # Ambiguous prefix extends to the longest common prefix.
+        area.text = "Exp"
+        area.cursor_location = (0, 3)
+        await pilot.press("tab")
+        assert area.text == "Expenses:"
+
+        # A unique match completes fully, ready for the amount.
+        area.text = "Expenses:R"
+        area.cursor_location = (0, 10)
+        await pilot.press("tab")
+        assert area.text == "Expenses:Rent  "
+
+        # Completion also works past the first line.
+        area.text = "Expenses:Rent  10 USD\nAssets:S"
+        area.cursor_location = (1, 8)
+        await pilot.press("tab")
+        assert area.text.splitlines()[1] == "Assets:Savings  "
+
+        # Outside the account position, the text is left alone.
+        area.text = "Expenses:Rent  14"
+        area.cursor_location = (0, 17)
+        await pilot.press("tab")
+        assert area.text == "Expenses:Rent  14"
 
 
 async def test_duplicate_transaction(ledger_path):

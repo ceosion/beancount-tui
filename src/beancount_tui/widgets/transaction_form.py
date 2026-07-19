@@ -17,6 +17,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
+from beancount_tui.widgets.postings_area import PostingsArea
 
 
 @dataclass
@@ -75,8 +76,10 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         postings_text: str = "",
         title: str = "New transaction",
         files: list[Path] | None = None,
+        accounts: list[str] | None = None,
     ) -> None:
         super().__init__()
+        self._accounts = accounts or []
         self._date = date or datetime.date.today().isoformat()
         self._flag = flag
         self._payee = payee
@@ -97,8 +100,11 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield Input(value=self._payee, id="payee", placeholder="(optional)")
             yield Label("Narration", classes="field-label")
             yield Input(value=self._narration, id="narration")
-            yield Label("Postings (one per line: ACCOUNT  AMOUNT CURRENCY)", classes="field-label")
-            yield TextArea(self._postings_text, id="postings")
+            yield Label(
+                "Postings (one per line: ACCOUNT  AMOUNT CURRENCY; Tab completes accounts)",
+                classes="field-label",
+            )
+            yield PostingsArea(self._postings_text, id="postings", accounts=self._accounts)
             if self._files:
                 yield Label("File", classes="field-label")
                 yield Select(

@@ -32,7 +32,7 @@ features.
 - [x] **Duplicate transaction.** A binding to copy the selected transaction
   into the new-transaction form with today's date — the fastest way to enter
   recurring transactions.
-- [ ] **Account name completion in the form.** The postings `TextArea` is
+- [x] **Account name completion in the form.** The postings `TextArea` is
   free-text; offer completion from `Ledger.accounts`.
 - [ ] **Auto-reload on external changes.** Watch the ledger file(s) and
   reload when another editor writes to them, instead of relying on `r`.

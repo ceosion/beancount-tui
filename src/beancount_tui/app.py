@@ -149,7 +149,9 @@ class BeancountTUI(App):
             append_transaction(result.filename or self.ledger.path, result.text)
             self.action_reload()
 
-        self.push_screen(TransactionForm(files=self.ledger.files), on_result)
+        self.push_screen(
+            TransactionForm(files=self.ledger.files, accounts=self.ledger.accounts), on_result
+        )
 
     def action_edit_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
@@ -165,7 +167,7 @@ class BeancountTUI(App):
                 replace_entry(entry, result.text)
                 self.action_reload()
 
-            self.push_screen(_edit_form(entry), on_form_result)
+            self.push_screen(_edit_form(entry, self.ledger.accounts), on_form_result)
             return
 
         def on_text_result(text: str | None) -> None:
@@ -192,7 +194,9 @@ class BeancountTUI(App):
             append_transaction(result.filename or self.ledger.path, result.text)
             self.action_reload()
 
-        self.push_screen(_duplicate_form(entry, self.ledger.files), on_result)
+        self.push_screen(
+            _duplicate_form(entry, self.ledger.files, self.ledger.accounts), on_result
+        )
 
     def action_delete_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
@@ -227,7 +231,7 @@ def _postings_text(txn: data.Transaction) -> str:
     return "\n".join(line.strip() for line in lines[1:])
 
 
-def _edit_form(txn: data.Transaction) -> TransactionForm:
+def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
     """Build a form pre-filled from an existing transaction."""
     return TransactionForm(
         date=txn.date.isoformat(),
@@ -236,10 +240,13 @@ def _edit_form(txn: data.Transaction) -> TransactionForm:
         narration=txn.narration or "",
         postings_text=_postings_text(txn),
         title="Edit transaction",
+        accounts=accounts,
     )
 
 
-def _duplicate_form(txn: data.Transaction, files: list[Path]) -> TransactionForm:
+def _duplicate_form(
+    txn: data.Transaction, files: list[Path], accounts: list[str]
+) -> TransactionForm:
     """Build a form for a copy of ``txn``, dated today and appended on save."""
     return TransactionForm(
         flag=txn.flag,
@@ -248,6 +255,7 @@ def _duplicate_form(txn: data.Transaction, files: list[Path]) -> TransactionForm
         postings_text=_postings_text(txn),
         title="Duplicate transaction",
         files=files,
+        accounts=accounts,
     )
 
 
