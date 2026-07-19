@@ -1,5 +1,7 @@
 """End-to-end smoke tests driving the Textual app."""
 
+import datetime
+
 from beancount.core import data
 from textual.widgets import Select
 
@@ -9,6 +11,7 @@ from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
@@ -225,6 +228,82 @@ async def test_filter_combines_with_account_selection(ledger_path):
         assert table.shown[0].payee == "Nice Restaurant"
 
 
+async def test_account_completion_in_postings(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        area = app.screen.query_one("#postings", PostingsArea)
+        area.focus()
+
+        # Ambiguous prefix extends to the longest common prefix.
+        area.text = "Exp"
+        area.cursor_location = (0, 3)
+        await pilot.press("tab")
+        assert area.text == "Expenses:"
+
+        # A unique match completes fully, ready for the amount.
+        area.text = "Expenses:R"
+        area.cursor_location = (0, 10)
+        await pilot.press("tab")
+        assert area.text == "Expenses:Rent  "
+
+        # Completion also works past the first line.
+        area.text = "Expenses:Rent  10 USD\nAssets:S"
+        area.cursor_location = (1, 8)
+        await pilot.press("tab")
+        assert area.text.splitlines()[1] == "Assets:Savings  "
+
+        # Outside the account position, the text is left alone.
+        area.text = "Expenses:Rent  14"
+        area.cursor_location = (0, 17)
+        await pilot.press("tab")
+        assert area.text == "Expenses:Rent  14"
+
+
+async def test_duplicate_transaction(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        rent_row = next(i for i, e in enumerate(table.shown) if e.payee == "Landlord")
+        table.move_cursor(row=rent_row)
+        await pilot.press("c")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#date").value == datetime.date.today().isoformat()
+        assert form.query_one("#payee").value == "Landlord"
+        assert "Expenses:Rent" in form.query_one("#postings").text
+
+        form._save()
+        await pilot.pause()
+        assert table.row_count == 7
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    copy = ledger.transactions[-1]
+    assert copy.payee == "Landlord"
+    assert copy.date == datetime.date.today()
+    assert str(copy.postings[0].units.number) == "1450.00"
+
+
+async def test_duplicate_requires_transaction(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        await pilot.press("c")
+        await pilot.pause()
+        assert not isinstance(app.screen, TransactionForm)
+
+
 async def test_toggle_directives(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
@@ -287,6 +366,91 @@ async def test_delete_directive_with_confirmation(ledger_path):
 
     assert "Reconciled" not in ledger_path.read_text()
     assert not Ledger.load(ledger_path).errors
+
+
+async def test_undo_restores_after_delete(ledger_path):
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.query_one(TransactionTable).move_cursor(row=0)
+        await pilot.press("d")
+        await pilot.pause()
+        app.screen.query_one("#confirm").press()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 5
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+    assert ledger_path.read_text() == original
+
+
+async def test_undo_restores_after_add(ledger_path):
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        form.query_one("#narration").value = "Soon undone"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+        # A second undo has nothing to restore.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+    assert ledger_path.read_text() == original
+
+
+EXTERNAL_TXN = (
+    '2026-01-21 * "External Editor" "Written outside the app"\n'
+    "  Expenses:Food:Groceries  5.00 USD\n"
+    "  Assets:Checking\n"
+)
+
+
+async def test_auto_reload_on_external_change(ledger_path):
+    app = BeancountTUI(ledger_path, watch_interval=0.05)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+        append_transaction(ledger_path, EXTERNAL_TXN)
+        await pilot.pause(0.5)
+
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 7
+        assert table.shown[-1].payee == "External Editor"
+
+
+async def test_no_auto_reload_while_modal_open(ledger_path):
+    app = BeancountTUI(ledger_path, watch_interval=0.05)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        assert isinstance(app.screen, TransactionForm)
+
+        append_transaction(ledger_path, EXTERNAL_TXN)
+        await pilot.pause(0.5)
+        # The open form blocks the reload...
+        assert app.query_one(TransactionTable).row_count == 6
+
+        await pilot.press("escape")
+        await pilot.pause(0.5)
+        # ...and it happens once the form closes.
+        assert app.query_one(TransactionTable).row_count == 7
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

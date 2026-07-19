@@ -75,6 +75,16 @@ class Ledger:
         included = {Path(name).resolve() for name in self.options.get("include", [])}
         return [top] + sorted(f for f in included if f != top)
 
+    def file_mtimes(self) -> dict[Path, float]:
+        """Modification times of all source files, for change detection."""
+        mtimes = {}
+        for file in self.files:
+            try:
+                mtimes[file] = file.stat().st_mtime
+            except OSError:
+                mtimes[file] = -1.0
+        return mtimes
+
     def transactions_for_account(self, account: str | None) -> list[data.Transaction]:
         """Transactions posting to ``account`` or any of its sub-accounts."""
         if account is None:
@@ -155,5 +165,5 @@ def transaction_amount(txn: data.Transaction) -> str:
         if posting.units is not None and posting.units.number is not None:
             if posting.units.number > Decimal(0):
                 inventory.add_amount(posting.units)
-    positions = sorted(inventory, key=lambda pos: pos.units.currency)
+    positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
     return ", ".join(f"{pos.units.number} {pos.units.currency}" for pos in positions)

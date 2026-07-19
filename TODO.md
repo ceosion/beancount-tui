@@ -29,18 +29,18 @@ features.
 - [x] **Edit non-transaction directives.** `open`, `close`, `balance`, `pad`,
   and `note` directives are invisible in the UI. At minimum show them;
   ideally make them editable through the same text-validation path.
-- [ ] **Duplicate transaction.** A binding to copy the selected transaction
+- [x] **Duplicate transaction.** A binding to copy the selected transaction
   into the new-transaction form with today's date — the fastest way to enter
   recurring transactions.
-- [ ] **Account name completion in the form.** The postings `TextArea` is
+- [x] **Account name completion in the form.** The postings `TextArea` is
   free-text; offer completion from `Ledger.accounts`.
-- [ ] **Auto-reload on external changes.** Watch the ledger file(s) and
+- [x] **Auto-reload on external changes.** Watch the ledger file(s) and
   reload when another editor writes to them, instead of relying on `r`.
-- [ ] **Undo.** At minimum, an in-app undo for the last write (keep the
+- [x] **Undo.** At minimum, an in-app undo for the last write (keep the
   pre-write file content in memory).
 
 ## Tooling
 
 - [x] **CI.** Add a GitHub Actions workflow running `uv run pytest` and
   `uv run ruff check .` — the repo currently has no CI.
-- [ ] **Type checking.** Add mypy or pyright to the dev group and CI.
+- [x] **Type checking.** Add mypy or pyright to the dev group and CI.

@@ -54,19 +54,25 @@ class BeancountTUI(App):
     BINDINGS = [
         ("n", "new_transaction", "New"),
         ("e", "edit_transaction", "Edit"),
+        ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
+        ("u", "undo", "Undo"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
     ]
 
-    def __init__(self, ledger_path: str | Path) -> None:
+    def __init__(self, ledger_path: str | Path, watch_interval: float = 1.0) -> None:
         super().__init__()
         self.ledger = Ledger.load(ledger_path)
         self.selected_account: str | None = None
         self.filter_query: str = ""
         self.show_directives: bool = False
+        self._watch_interval = watch_interval
+        self._watched_mtimes = self.ledger.file_mtimes()
+        # Single-level undo: the affected file and its content before the last write.
+        self._undo: tuple[Path, str] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -81,12 +87,15 @@ class BeancountTUI(App):
     def on_mount(self) -> None:
         self.sub_title = str(self.ledger.path)
         self.refresh_views()
+        self.set_interval(self._watch_interval, self._check_external_changes)
 
     def _visible_entries(self) -> list[data.Directive]:
         if self.show_directives:
-            entries = self.ledger.entries_for_account(self.selected_account)
+            entries: list[data.Directive] = self.ledger.entries_for_account(
+                self.selected_account
+            )
         else:
-            entries = self.ledger.transactions_for_account(self.selected_account)
+            entries = list(self.ledger.transactions_for_account(self.selected_account))
         return filter_transactions(entries, self.filter_query)
 
     def refresh_views(self) -> None:
@@ -136,19 +145,52 @@ class BeancountTUI(App):
         self.query_one(TransactionTable).update_entries(self._visible_entries())
         self.query_one(TransactionTable).focus()
 
+    def _snapshot_for_undo(self, path: str | Path) -> None:
+        path = Path(path)
+        self._undo = (path, path.read_text(encoding="utf-8"))
+
+    def action_undo(self) -> None:
+        if self._undo is None:
+            self.notify("Nothing to undo.", severity="warning")
+            return
+        path, content = self._undo
+        path.write_text(content, encoding="utf-8")
+        self._undo = None
+        self.ledger.reload()
+        self._watched_mtimes = self.ledger.file_mtimes()
+        self.refresh_views()
+        self.notify(f"Undid last change to {path.name}.")
+
     def action_reload(self) -> None:
         self.ledger.reload()
+        self._watched_mtimes = self.ledger.file_mtimes()
         self.refresh_views()
         self.notify("Ledger reloaded.")
+
+    def _check_external_changes(self) -> None:
+        # Leave the ledger alone while a modal (form/dialog) is open: a reload
+        # under an in-progress edit would let it write back to stale locations.
+        if len(self.screen_stack) > 1:
+            return
+        current = self.ledger.file_mtimes()
+        if current != self._watched_mtimes:
+            self.ledger.reload()
+            self._watched_mtimes = self.ledger.file_mtimes()
+            self.refresh_views()
+            self.notify("Ledger changed on disk; reloaded.")
 
     def action_new_transaction(self) -> None:
         def on_result(result: TransactionFormResult | None) -> None:
             if result is None:
                 return
-            append_transaction(result.filename or self.ledger.path, result.text)
+            target = result.filename or self.ledger.path
+            self._snapshot_for_undo(target)
+            append_transaction(target, result.text)
             self.action_reload()
 
-        self.push_screen(TransactionForm(files=self.ledger.files), on_result)
+        self.push_screen(
+            TransactionForm(files=self.ledger.files, accounts=self.ledger.accounts), on_result
+        )
 
     def action_edit_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
@@ -161,15 +203,17 @@ class BeancountTUI(App):
             def on_form_result(result: TransactionFormResult | None) -> None:
                 if result is None:
                     return
+                self._snapshot_for_undo(entry.meta["filename"])
                 replace_entry(entry, result.text)
                 self.action_reload()
 
-            self.push_screen(_edit_form(entry), on_form_result)
+            self.push_screen(_edit_form(entry, self.ledger.accounts), on_form_result)
             return
 
         def on_text_result(text: str | None) -> None:
             if text is None:
                 return
+            self._snapshot_for_undo(entry.meta["filename"])
             replace_entry(entry, text)
             self.action_reload()
 
@@ -177,6 +221,24 @@ class BeancountTUI(App):
         self.push_screen(
             DirectiveForm(format_entry(entry).rstrip("\n"), title=f"Edit {keyword} directive"),
             on_text_result,
+        )
+
+    def action_duplicate_transaction(self) -> None:
+        entry = self.query_one(TransactionTable).selected_entry
+        if not isinstance(entry, data.Transaction):
+            self.notify("No transaction selected.", severity="warning")
+            return
+
+        def on_result(result: TransactionFormResult | None) -> None:
+            if result is None:
+                return
+            target = result.filename or self.ledger.path
+            self._snapshot_for_undo(target)
+            append_transaction(target, result.text)
+            self.action_reload()
+
+        self.push_screen(
+            _duplicate_form(entry, self.ledger.files, self.ledger.accounts), on_result
         )
 
     def action_delete_transaction(self) -> None:
@@ -188,6 +250,7 @@ class BeancountTUI(App):
         def on_result(confirmed: bool | None) -> None:
             if not confirmed:
                 return
+            self._snapshot_for_undo(entry.meta["filename"])
             delete_entry(entry)
             self.action_reload()
 
@@ -207,17 +270,36 @@ def _entry_summary(entry: data.Directive) -> str:
     return f"{keyword} directive {entry.date} {accounts}"
 
 
-def _edit_form(txn: data.Transaction) -> TransactionForm:
-    """Build a form pre-filled from an existing transaction."""
+def _postings_text(txn: data.Transaction) -> str:
     lines = format_entry(txn).rstrip("\n").split("\n")
-    postings_text = "\n".join(line.strip() for line in lines[1:])
+    return "\n".join(line.strip() for line in lines[1:])
+
+
+def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
+    """Build a form pre-filled from an existing transaction."""
     return TransactionForm(
         date=txn.date.isoformat(),
-        flag=txn.flag,
+        flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
-        postings_text=postings_text,
+        postings_text=_postings_text(txn),
         title="Edit transaction",
+        accounts=accounts,
+    )
+
+
+def _duplicate_form(
+    txn: data.Transaction, files: list[Path], accounts: list[str]
+) -> TransactionForm:
+    """Build a form for a copy of ``txn``, dated today and appended on save."""
+    return TransactionForm(
+        flag=txn.flag or "*",
+        payee=txn.payee or "",
+        narration=txn.narration or "",
+        postings_text=_postings_text(txn),
+        title="Duplicate transaction",
+        files=files,
+        accounts=accounts,
     )
 
 

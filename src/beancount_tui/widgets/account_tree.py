@@ -25,21 +25,23 @@ class AccountTree(Tree[str]):
 
     def update_accounts(self, real_root: realization.RealAccount) -> None:
         self.clear()
-        self._add_children(self.root, real_root)
+        self._add_account_nodes(self.root, real_root)
         self.root.expand()
 
-    def _add_children(self, node: TreeNode, real_account: realization.RealAccount) -> None:
+    def _add_account_nodes(
+        self, node: TreeNode, real_account: realization.RealAccount
+    ) -> None:
         for name in sorted(real_account):
             child = real_account[name]
             # Cumulative balance: the account's own postings plus all children.
             balance = realization.compute_balance(child).reduce(lambda pos: pos.units)
-            positions = sorted(balance, key=lambda pos: pos.units.currency)
+            positions = sorted(balance.get_positions(), key=lambda pos: pos.units.currency)
             amounts = ", ".join(
                 f"{pos.units.number:,} {pos.units.currency}" for pos in positions
             )
             label = f"{name}  [dim]{amounts}[/dim]" if amounts else name
             child_node = node.add(label, data=child.account, expand=True)
-            self._add_children(child_node, child)
+            self._add_account_nodes(child_node, child)
             if not child:
                 child_node.allow_expand = False
 
