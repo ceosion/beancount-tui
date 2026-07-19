@@ -1,10 +1,15 @@
 """End-to-end smoke tests driving the Textual app."""
 
+from beancount.core import data
+from textual.widgets import Select
+
 from beancount_tui.app import BeancountTUI
 from beancount_tui.editor import append_transaction
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
+from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -124,6 +129,164 @@ async def test_delete_cancelled_keeps_transaction(ledger_path):
         assert app.query_one(TransactionTable).row_count == 6
 
     assert len(Ledger.load(ledger_path).transactions) == 6
+
+
+async def test_single_file_form_has_no_file_picker(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert not form.query("#target-file")
+
+
+async def test_new_transaction_into_included_file(multi_ledger_path):
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  4.50 USD\nAssets:Checking"
+        )
+        form.query_one("#target-file", Select).value = str(food)
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+        assert app.query_one(TransactionTable).row_count == 3
+
+    assert "Corner Cafe" in food.read_text()
+    ledger = Ledger.load(multi_ledger_path)
+    assert not ledger.errors
+    assert len(ledger.transactions) == 3
+
+
+async def test_edit_transaction_in_included_file_writes_in_place(multi_ledger_path):
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # Row 1 is the groceries transaction, which lives in food.beancount.
+        app.query_one(TransactionTable).move_cursor(row=1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#narration").value == "Weekly groceries"
+
+        form.query_one("#narration").value = "Weekly groceries (edited)"
+        form._save()
+        await pilot.pause()
+
+    assert "Weekly groceries (edited)" in food.read_text()
+    assert "edited" not in multi_ledger_path.read_text()
+
+
+async def test_filter_via_filter_bar(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        bar = app.query_one(FilterBar)
+        assert bar.has_class("visible")
+        assert bar.has_focus
+
+        await pilot.press(*"grocer")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Green Grocer"
+
+        # Escape drops the filter and hides the bar.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert table.row_count == 6
+        assert not bar.has_class("visible")
+
+
+async def test_filter_combines_with_account_selection(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Expenses:Food"
+        await pilot.press("/")
+        await pilot.press(*"dinner")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Nice Restaurant"
+
+
+async def test_toggle_directives(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 6
+        await pilot.press("t")
+        await pilot.pause()
+        # 6 transactions + 7 opens + 1 balance + 1 note
+        assert table.row_count == 15
+        await pilot.press("t")
+        await pilot.pause()
+        assert table.row_count == 6
+
+
+async def test_edit_note_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "note" in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-01-16 note Assets:Checking "Reconciled (edited)"'
+        )
+        form._save()
+        await pilot.pause()
+
+    assert "Reconciled (edited)" in ledger_path.read_text()
+    assert not Ledger.load(ledger_path).errors
+
+
+async def test_delete_directive_with_confirmation(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        await pilot.press("d")
+        await pilot.pause()
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+    assert "Reconciled" not in ledger_path.read_text()
+    assert not Ledger.load(ledger_path).errors
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

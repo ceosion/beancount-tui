@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
@@ -9,6 +10,9 @@ from pathlib import Path
 from beancount import loader
 from beancount.core import data, getters, realization
 from beancount.core.inventory import Inventory
+
+
+DISPLAYED_DIRECTIVES = (data.Transaction, data.Open, data.Close, data.Balance, data.Pad, data.Note)
 
 
 @dataclass
@@ -42,6 +46,35 @@ class Ledger:
         """All account names that appear in the ledger, sorted."""
         return sorted(getters.get_accounts(self.entries))
 
+    @property
+    def directives(self) -> list[data.Directive]:
+        """All entries of the types the UI displays, transactions included."""
+        return [e for e in self.entries if isinstance(e, DISPLAYED_DIRECTIVES)]
+
+    def entries_for_account(self, account: str | None) -> list[data.Directive]:
+        """Displayable entries touching ``account`` or any of its sub-accounts."""
+        if account is None:
+            return self.directives
+        prefix = account + ":"
+        return [
+            entry
+            for entry in self.directives
+            if any(
+                a == account or a.startswith(prefix)
+                for a in getters.get_entry_accounts(entry)
+            )
+        ]
+
+    @property
+    def files(self) -> list[Path]:
+        """All source files of the ledger: the top-level file, then includes.
+
+        Beancount records every processed file in ``options["include"]``.
+        """
+        top = self.path.resolve()
+        included = {Path(name).resolve() for name in self.options.get("include", [])}
+        return [top] + sorted(f for f in included if f != top)
+
     def transactions_for_account(self, account: str | None) -> list[data.Transaction]:
         """Transactions posting to ``account`` or any of its sub-accounts."""
         if account is None:
@@ -56,6 +89,59 @@ class Ledger:
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""
         return realization.realize(self.entries)
+
+
+def filter_transactions(
+    transactions: list[data.Directive], query: str
+) -> list[data.Directive]:
+    """Filter entries by text or by date range.
+
+    A query of the form ``START..END`` — ISO dates, either side optional
+    (``2026-01-01..2026-01-31``, ``2026-01-15..``, ``..2026-01-10``) —
+    selects a date range, inclusive on both ends. Any other query is a
+    case-insensitive substring match: against payee and narration for
+    transactions, and against the directive keyword, accounts, and note
+    comment for other directives.
+    """
+    query = query.strip()
+    if not query:
+        return transactions
+    date_range = _parse_date_range(query)
+    if date_range is not None:
+        start, end = date_range
+        return [
+            txn
+            for txn in transactions
+            if (start is None or txn.date >= start) and (end is None or txn.date <= end)
+        ]
+    needle = query.lower()
+    return [txn for txn in transactions if needle in _entry_search_text(txn).lower()]
+
+
+def _entry_search_text(entry: data.Directive) -> str:
+    if isinstance(entry, data.Transaction):
+        return f"{entry.payee or ''} {entry.narration or ''}"
+    parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
+    if isinstance(entry, data.Note):
+        parts.append(entry.comment)
+    return " ".join(parts)
+
+
+def _parse_date_range(
+    query: str,
+) -> tuple[datetime.date | None, datetime.date | None] | None:
+    """Parse ``START..END`` into dates, or ``None`` if it isn't a date range."""
+    if ".." not in query:
+        return None
+    start_text, _, end_text = query.partition("..")
+    try:
+        start = datetime.date.fromisoformat(start_text.strip()) if start_text.strip() else None
+        end = datetime.date.fromisoformat(end_text.strip()) if end_text.strip() else None
+    except ValueError:
+        return None
+    if start is None and end is None:
+        return None
+    return start, end
 
 
 def transaction_amount(txn: data.Transaction) -> str:

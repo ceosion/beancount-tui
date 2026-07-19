@@ -8,17 +8,27 @@ accepts is guaranteed to be syntactically valid.
 from __future__ import annotations
 
 import datetime
+from dataclasses import dataclass
+from pathlib import Path
 
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Static, TextArea
+from textual.widgets import Button, Input, Label, Select, Static, TextArea
 
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
 
 
-class TransactionForm(ModalScreen[str | None]):
-    """Returns the transaction's source text, or ``None`` if cancelled."""
+@dataclass
+class TransactionFormResult:
+    """What the form hands back on save."""
+
+    text: str
+    filename: str | None = None  # target file for a new transaction; None = caller's default
+
+
+class TransactionForm(ModalScreen[TransactionFormResult | None]):
+    """Returns a :class:`TransactionFormResult`, or ``None`` if cancelled."""
 
     BINDINGS = [("escape", "cancel", "Cancel")]
 
@@ -64,6 +74,7 @@ class TransactionForm(ModalScreen[str | None]):
         narration: str = "",
         postings_text: str = "",
         title: str = "New transaction",
+        files: list[Path] | None = None,
     ) -> None:
         super().__init__()
         self._date = date or datetime.date.today().isoformat()
@@ -72,6 +83,8 @@ class TransactionForm(ModalScreen[str | None]):
         self._narration = narration
         self._postings_text = postings_text
         self._title = title
+        # Offer a target-file picker only when there is a real choice.
+        self._files = files if files and len(files) > 1 else None
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -86,6 +99,14 @@ class TransactionForm(ModalScreen[str | None]):
             yield Input(value=self._narration, id="narration")
             yield Label("Postings (one per line: ACCOUNT  AMOUNT CURRENCY)", classes="field-label")
             yield TextArea(self._postings_text, id="postings")
+            if self._files:
+                yield Label("File", classes="field-label")
+                yield Select(
+                    [(self._file_label(f), str(f)) for f in self._files],
+                    value=str(self._files[0]),
+                    allow_blank=False,
+                    id="target-file",
+                )
             yield Static("", id="error")
             with Horizontal(id="buttons"):
                 yield Button("Cancel", id="cancel")
@@ -105,6 +126,13 @@ class TransactionForm(ModalScreen[str | None]):
         )
         return f"{header}\n{body}\n"
 
+    def _file_label(self, file: Path) -> str:
+        top_dir = self._files[0].parent
+        try:
+            return str(file.relative_to(top_dir))
+        except ValueError:
+            return str(file)
+
     def _save(self) -> None:
         text = self._assemble_text()
         try:
@@ -112,7 +140,10 @@ class TransactionForm(ModalScreen[str | None]):
         except TransactionParseError as exc:
             self.query_one("#error", Static).update(str(exc))
             return
-        self.dismiss(text)
+        filename = None
+        if self._files:
+            filename = str(self.query_one("#target-file", Select).value)
+        self.dismiss(TransactionFormResult(text=text, filename=filename))
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
