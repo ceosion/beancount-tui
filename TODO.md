@@ -26,7 +26,7 @@ features.
   file via the entry's `filename` metadata, but new transactions are always
   appended to the top-level file. Let the user pick the target file when the
   ledger uses `include` directives.
-- [ ] **Edit non-transaction directives.** `open`, `close`, `balance`, `pad`,
+- [x] **Edit non-transaction directives.** `open`, `close`, `balance`, `pad`,
   and `note` directives are invisible in the UI. At minimum show them;
   ideally make them editable through the same text-validation path.
 - [ ] **Duplicate transaction.** A binding to copy the selected transaction

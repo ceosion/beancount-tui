@@ -28,6 +28,20 @@ def test_transaction_amount(ledger_path):
     assert transaction_amount(rent) == "1450.00 USD"
 
 
+def test_entries_for_account_includes_directives(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    checking = ledger.entries_for_account("Assets:Checking")
+    assert {"Open", "Note", "Transaction"} <= {type(e).__name__ for e in checking}
+    salary = ledger.entries_for_account("Income:Salary")
+    assert "Balance" in {type(e).__name__ for e in salary}
+
+
+def test_directives_includes_all_displayed_types(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    # 7 opens + 6 transactions + 1 balance + 1 note
+    assert len(ledger.directives) == 15
+
+
 def test_files_single_file(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert ledger.files == [ledger_path.resolve()]

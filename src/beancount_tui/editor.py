@@ -18,20 +18,31 @@ class TransactionParseError(Exception):
     """The text entered by the user is not a single valid transaction."""
 
 
+def parse_directive_text(text: str) -> data.Directive:
+    """Parse user-entered text into exactly one directive of any type.
+
+    Raises :class:`TransactionParseError` with a readable message if the text
+    has syntax errors or does not contain exactly one directive.
+    """
+    entries, errors, _ = parser.parse_string(text)
+    if errors:
+        messages = "; ".join(error.message for error in errors)
+        raise TransactionParseError(messages)
+    if len(entries) != 1:
+        raise TransactionParseError("Expected exactly one directive.")
+    return entries[0]
+
+
 def parse_transaction_text(text: str) -> data.Transaction:
     """Parse user-entered text into exactly one transaction.
 
     Raises :class:`TransactionParseError` with a readable message if the text
     has syntax errors or does not contain exactly one transaction.
     """
-    entries, errors, _ = parser.parse_string(text)
-    if errors:
-        messages = "; ".join(error.message for error in errors)
-        raise TransactionParseError(messages)
-    transactions = [e for e in entries if isinstance(e, data.Transaction)]
-    if len(entries) != 1 or len(transactions) != 1:
+    entry = parse_directive_text(text)
+    if not isinstance(entry, data.Transaction):
         raise TransactionParseError("Expected exactly one transaction.")
-    return transactions[0]
+    return entry
 
 
 def format_entry(entry: data.Directive) -> str:

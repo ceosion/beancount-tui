@@ -1,10 +1,12 @@
 import pytest
+from beancount.core import data
 
 from beancount_tui.editor import (
     TransactionParseError,
     append_transaction,
     delete_entry,
     entry_line_span,
+    parse_directive_text,
     parse_transaction_text,
     replace_entry,
 )
@@ -31,6 +33,31 @@ def test_parse_transaction_text_syntax_error():
 def test_parse_transaction_text_rejects_multiple_entries():
     with pytest.raises(TransactionParseError, match="exactly one"):
         parse_transaction_text(NEW_TXN + "\n" + NEW_TXN)
+
+
+def test_parse_directive_text_valid():
+    directive = parse_directive_text("2026-01-20 open Assets:Cash USD\n")
+    assert directive.account == "Assets:Cash"
+
+
+def test_parse_directive_text_rejects_multiple():
+    with pytest.raises(TransactionParseError, match="exactly one"):
+        parse_directive_text("2026-01-20 open Assets:Cash\n2026-01-21 open Assets:Bank\n")
+
+
+def test_parse_transaction_text_rejects_non_transaction():
+    with pytest.raises(TransactionParseError, match="transaction"):
+        parse_transaction_text("2026-01-20 open Assets:Cash USD\n")
+
+
+def test_replace_non_transaction_entry(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    note = next(e for e in ledger.directives if isinstance(e, data.Note))
+    replace_entry(note, '2026-01-16 note Assets:Checking "Updated note"\n')
+    ledger.reload()
+    assert not ledger.errors
+    note = next(e for e in ledger.directives if isinstance(e, data.Note))
+    assert note.comment == "Updated note"
 
 
 def test_entry_line_span():

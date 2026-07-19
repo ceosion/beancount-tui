@@ -1,5 +1,6 @@
 """End-to-end smoke tests driving the Textual app."""
 
+from beancount.core import data
 from textual.widgets import Select
 
 from beancount_tui.app import BeancountTUI
@@ -7,6 +8,7 @@ from beancount_tui.editor import append_transaction
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
+from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
@@ -221,6 +223,70 @@ async def test_filter_combines_with_account_selection(ledger_path):
         table = app.query_one(TransactionTable)
         assert table.row_count == 1
         assert table.shown[0].payee == "Nice Restaurant"
+
+
+async def test_toggle_directives(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 6
+        await pilot.press("t")
+        await pilot.pause()
+        # 6 transactions + 7 opens + 1 balance + 1 note
+        assert table.row_count == 15
+        await pilot.press("t")
+        await pilot.pause()
+        assert table.row_count == 6
+
+
+async def test_edit_note_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "note" in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-01-16 note Assets:Checking "Reconciled (edited)"'
+        )
+        form._save()
+        await pilot.pause()
+
+    assert "Reconciled (edited)" in ledger_path.read_text()
+    assert not Ledger.load(ledger_path).errors
+
+
+async def test_delete_directive_with_confirmation(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        await pilot.press("d")
+        await pilot.pause()
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+    assert "Reconciled" not in ledger_path.read_text()
+    assert not Ledger.load(ledger_path).errors
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

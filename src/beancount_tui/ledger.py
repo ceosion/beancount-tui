@@ -12,6 +12,9 @@ from beancount.core import data, getters, realization
 from beancount.core.inventory import Inventory
 
 
+DISPLAYED_DIRECTIVES = (data.Transaction, data.Open, data.Close, data.Balance, data.Pad, data.Note)
+
+
 @dataclass
 class Ledger:
     """A loaded Beancount ledger.
@@ -44,6 +47,25 @@ class Ledger:
         return sorted(getters.get_accounts(self.entries))
 
     @property
+    def directives(self) -> list[data.Directive]:
+        """All entries of the types the UI displays, transactions included."""
+        return [e for e in self.entries if isinstance(e, DISPLAYED_DIRECTIVES)]
+
+    def entries_for_account(self, account: str | None) -> list[data.Directive]:
+        """Displayable entries touching ``account`` or any of its sub-accounts."""
+        if account is None:
+            return self.directives
+        prefix = account + ":"
+        return [
+            entry
+            for entry in self.directives
+            if any(
+                a == account or a.startswith(prefix)
+                for a in getters.get_entry_accounts(entry)
+            )
+        ]
+
+    @property
     def files(self) -> list[Path]:
         """All source files of the ledger: the top-level file, then includes.
 
@@ -70,14 +92,16 @@ class Ledger:
 
 
 def filter_transactions(
-    transactions: list[data.Transaction], query: str
-) -> list[data.Transaction]:
-    """Filter transactions by payee/narration text or by date range.
+    transactions: list[data.Directive], query: str
+) -> list[data.Directive]:
+    """Filter entries by text or by date range.
 
     A query of the form ``START..END`` — ISO dates, either side optional
     (``2026-01-01..2026-01-31``, ``2026-01-15..``, ``..2026-01-10``) —
     selects a date range, inclusive on both ends. Any other query is a
-    case-insensitive substring match against payee and narration.
+    case-insensitive substring match: against payee and narration for
+    transactions, and against the directive keyword, accounts, and note
+    comment for other directives.
     """
     query = query.strip()
     if not query:
@@ -91,11 +115,16 @@ def filter_transactions(
             if (start is None or txn.date >= start) and (end is None or txn.date <= end)
         ]
     needle = query.lower()
-    return [
-        txn
-        for txn in transactions
-        if needle in (txn.payee or "").lower() or needle in (txn.narration or "").lower()
-    ]
+    return [txn for txn in transactions if needle in _entry_search_text(txn).lower()]
+
+
+def _entry_search_text(entry: data.Directive) -> str:
+    if isinstance(entry, data.Transaction):
+        return f"{entry.payee or ''} {entry.narration or ''}"
+    parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
+    if isinstance(entry, data.Note):
+        parts.append(entry.comment)
+    return " ".join(parts)
 
 
 def _parse_date_range(

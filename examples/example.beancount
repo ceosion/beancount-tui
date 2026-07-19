@@ -34,3 +34,7 @@ option "operating_currency" "USD"
 2026-01-15 * "Transfer to savings"
   Assets:Savings            1000.00 USD
   Assets:Checking
+
+2026-01-16 balance Income:Salary  -4200.00 USD
+
+2026-01-16 note Assets:Checking "Reconciled against bank statement"
