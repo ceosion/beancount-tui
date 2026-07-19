@@ -6,7 +6,11 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
 dependencies = [
-    "beancount>=3.0.0",
+    # <3.2.1: 3.2.1 ships no sdist, and 3.2.2+ build-requires flex-bin/bison-bin,
+    # whose ziglang build dependency has no wheels for platforms like Android
+    # (Termux) — making source builds impossible there. 3.2.0 builds from source
+    # with just meson and system flex/bison.
+    "beancount>=3.0.0,<3.2.1",
     "textual>=0.80.0",
 ]
 
