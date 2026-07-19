@@ -29,7 +29,7 @@ features.
 - [x] **Edit non-transaction directives.** `open`, `close`, `balance`, `pad`,
   and `note` directives are invisible in the UI. At minimum show them;
   ideally make them editable through the same text-validation path.
-- [ ] **Duplicate transaction.** A binding to copy the selected transaction
+- [x] **Duplicate transaction.** A binding to copy the selected transaction
   into the new-transaction form with today's date — the fastest way to enter
   recurring transactions.
 - [ ] **Account name completion in the form.** The postings `TextArea` is

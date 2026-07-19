@@ -54,6 +54,7 @@ class BeancountTUI(App):
     BINDINGS = [
         ("n", "new_transaction", "New"),
         ("e", "edit_transaction", "Edit"),
+        ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
         ("/", "filter", "Filter"),
@@ -179,6 +180,20 @@ class BeancountTUI(App):
             on_text_result,
         )
 
+    def action_duplicate_transaction(self) -> None:
+        entry = self.query_one(TransactionTable).selected_entry
+        if not isinstance(entry, data.Transaction):
+            self.notify("No transaction selected.", severity="warning")
+            return
+
+        def on_result(result: TransactionFormResult | None) -> None:
+            if result is None:
+                return
+            append_transaction(result.filename or self.ledger.path, result.text)
+            self.action_reload()
+
+        self.push_screen(_duplicate_form(entry, self.ledger.files), on_result)
+
     def action_delete_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
         if entry is None:
@@ -207,17 +222,32 @@ def _entry_summary(entry: data.Directive) -> str:
     return f"{keyword} directive {entry.date} {accounts}"
 
 
+def _postings_text(txn: data.Transaction) -> str:
+    lines = format_entry(txn).rstrip("\n").split("\n")
+    return "\n".join(line.strip() for line in lines[1:])
+
+
 def _edit_form(txn: data.Transaction) -> TransactionForm:
     """Build a form pre-filled from an existing transaction."""
-    lines = format_entry(txn).rstrip("\n").split("\n")
-    postings_text = "\n".join(line.strip() for line in lines[1:])
     return TransactionForm(
         date=txn.date.isoformat(),
         flag=txn.flag,
         payee=txn.payee or "",
         narration=txn.narration or "",
-        postings_text=postings_text,
+        postings_text=_postings_text(txn),
         title="Edit transaction",
+    )
+
+
+def _duplicate_form(txn: data.Transaction, files: list[Path]) -> TransactionForm:
+    """Build a form for a copy of ``txn``, dated today and appended on save."""
+    return TransactionForm(
+        flag=txn.flag,
+        payee=txn.payee or "",
+        narration=txn.narration or "",
+        postings_text=_postings_text(txn),
+        title="Duplicate transaction",
+        files=files,
     )
 
 
