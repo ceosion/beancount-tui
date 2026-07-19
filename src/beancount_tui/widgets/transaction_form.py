@@ -133,6 +133,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         return f"{header}\n{body}\n"
 
     def _file_label(self, file: Path) -> str:
+        assert self._files
         top_dir = self._files[0].parent
         try:
             return str(file.relative_to(top_dir))

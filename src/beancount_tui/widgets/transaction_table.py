@@ -47,7 +47,7 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
     """
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
-        return (date, entry.flag, entry.payee or "", entry.narration or "",
+        return (date, entry.flag or "*", entry.payee or "", entry.narration or "",
                 transaction_amount(entry))
     if isinstance(entry, data.Open):
         return (date, "open", "", entry.account, ", ".join(entry.currencies or []))

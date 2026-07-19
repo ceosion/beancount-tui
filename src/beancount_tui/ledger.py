@@ -165,5 +165,5 @@ def transaction_amount(txn: data.Transaction) -> str:
         if posting.units is not None and posting.units.number is not None:
             if posting.units.number > Decimal(0):
                 inventory.add_amount(posting.units)
-    positions = sorted(inventory, key=lambda pos: pos.units.currency)
+    positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
     return ", ".join(f"{pos.units.number} {pos.units.currency}" for pos in positions)

@@ -91,9 +91,11 @@ class BeancountTUI(App):
 
     def _visible_entries(self) -> list[data.Directive]:
         if self.show_directives:
-            entries = self.ledger.entries_for_account(self.selected_account)
+            entries: list[data.Directive] = self.ledger.entries_for_account(
+                self.selected_account
+            )
         else:
-            entries = self.ledger.transactions_for_account(self.selected_account)
+            entries = list(self.ledger.transactions_for_account(self.selected_account))
         return filter_transactions(entries, self.filter_query)
 
     def refresh_views(self) -> None:
@@ -277,7 +279,7 @@ def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
     """Build a form pre-filled from an existing transaction."""
     return TransactionForm(
         date=txn.date.isoformat(),
-        flag=txn.flag,
+        flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
         postings_text=_postings_text(txn),
@@ -291,7 +293,7 @@ def _duplicate_form(
 ) -> TransactionForm:
     """Build a form for a copy of ``txn``, dated today and appended on save."""
     return TransactionForm(
-        flag=txn.flag,
+        flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
         postings_text=_postings_text(txn),

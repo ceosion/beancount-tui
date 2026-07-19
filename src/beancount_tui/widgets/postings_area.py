@@ -22,7 +22,7 @@ class PostingsArea(TextArea):
         super().__init__(text, **kwargs)
         self.accounts = accounts or []
 
-    def _on_key(self, event: events.Key) -> None:
+    async def _on_key(self, event: events.Key) -> None:
         if event.key != "tab":
             return
         row, col = self.cursor_location
