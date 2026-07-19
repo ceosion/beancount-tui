@@ -36,7 +36,7 @@ features.
   free-text; offer completion from `Ledger.accounts`.
 - [x] **Auto-reload on external changes.** Watch the ledger file(s) and
   reload when another editor writes to them, instead of relying on `r`.
-- [ ] **Undo.** At minimum, an in-app undo for the last write (keep the
+- [x] **Undo.** At minimum, an in-app undo for the last write (keep the
   pre-write file content in memory).
 
 ## Tooling

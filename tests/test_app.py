@@ -368,6 +368,52 @@ async def test_delete_directive_with_confirmation(ledger_path):
     assert not Ledger.load(ledger_path).errors
 
 
+async def test_undo_restores_after_delete(ledger_path):
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.query_one(TransactionTable).move_cursor(row=0)
+        await pilot.press("d")
+        await pilot.pause()
+        app.screen.query_one("#confirm").press()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 5
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+    assert ledger_path.read_text() == original
+
+
+async def test_undo_restores_after_add(ledger_path):
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        form.query_one("#narration").value = "Soon undone"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+        # A second undo has nothing to restore.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+
+    assert ledger_path.read_text() == original
+
+
 EXTERNAL_TXN = (
     '2026-01-21 * "External Editor" "Written outside the app"\n'
     "  Expenses:Food:Groceries  5.00 USD\n"

@@ -57,6 +57,7 @@ class BeancountTUI(App):
         ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
+        ("u", "undo", "Undo"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
@@ -70,6 +71,8 @@ class BeancountTUI(App):
         self.show_directives: bool = False
         self._watch_interval = watch_interval
         self._watched_mtimes = self.ledger.file_mtimes()
+        # Single-level undo: the affected file and its content before the last write.
+        self._undo: tuple[Path, str] | None = None
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -140,6 +143,22 @@ class BeancountTUI(App):
         self.query_one(TransactionTable).update_entries(self._visible_entries())
         self.query_one(TransactionTable).focus()
 
+    def _snapshot_for_undo(self, path: str | Path) -> None:
+        path = Path(path)
+        self._undo = (path, path.read_text(encoding="utf-8"))
+
+    def action_undo(self) -> None:
+        if self._undo is None:
+            self.notify("Nothing to undo.", severity="warning")
+            return
+        path, content = self._undo
+        path.write_text(content, encoding="utf-8")
+        self._undo = None
+        self.ledger.reload()
+        self._watched_mtimes = self.ledger.file_mtimes()
+        self.refresh_views()
+        self.notify(f"Undid last change to {path.name}.")
+
     def action_reload(self) -> None:
         self.ledger.reload()
         self._watched_mtimes = self.ledger.file_mtimes()
@@ -162,7 +181,9 @@ class BeancountTUI(App):
         def on_result(result: TransactionFormResult | None) -> None:
             if result is None:
                 return
-            append_transaction(result.filename or self.ledger.path, result.text)
+            target = result.filename or self.ledger.path
+            self._snapshot_for_undo(target)
+            append_transaction(target, result.text)
             self.action_reload()
 
         self.push_screen(
@@ -180,6 +201,7 @@ class BeancountTUI(App):
             def on_form_result(result: TransactionFormResult | None) -> None:
                 if result is None:
                     return
+                self._snapshot_for_undo(entry.meta["filename"])
                 replace_entry(entry, result.text)
                 self.action_reload()
 
@@ -189,6 +211,7 @@ class BeancountTUI(App):
         def on_text_result(text: str | None) -> None:
             if text is None:
                 return
+            self._snapshot_for_undo(entry.meta["filename"])
             replace_entry(entry, text)
             self.action_reload()
 
@@ -207,7 +230,9 @@ class BeancountTUI(App):
         def on_result(result: TransactionFormResult | None) -> None:
             if result is None:
                 return
-            append_transaction(result.filename or self.ledger.path, result.text)
+            target = result.filename or self.ledger.path
+            self._snapshot_for_undo(target)
+            append_transaction(target, result.text)
             self.action_reload()
 
         self.push_screen(
@@ -223,6 +248,7 @@ class BeancountTUI(App):
         def on_result(confirmed: bool | None) -> None:
             if not confirmed:
                 return
+            self._snapshot_for_undo(entry.meta["filename"])
             delete_entry(entry)
             self.action_reload()
 
