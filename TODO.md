@@ -1,46 +1,64 @@
 # TODO
 
-Follow-up tasks, roughly in priority order. Items in **Known scaffold
-limitations** are gaps in the current implementation; the rest are new
-features.
+Roadmap for the next round of work, roughly in priority order within each
+section. The v0.1 scope — full editing workflow (add/edit/duplicate/delete/
+undo), filtering, multi-file ledgers, directive display/editing, auto-reload,
+CI with lint + mypy + tests — is done; see the git history for details.
 
-## Known scaffold limitations
+## Reports & views
 
-- [x] **Preserve/choose the transaction flag in the form.** The form always
-  saves with flag `*`, so editing a `!` (pending) transaction silently
-  normalizes it to `*`. Add a flag field (or toggle) to `TransactionForm`
-  and prefill it on edit.
-- [x] **Delete transactions.** There is no way to remove a transaction from
-  the UI. Add a `d` binding with a confirmation prompt; the write side can
-  reuse `entry_line_span` to splice out the entry's source lines.
-- [x] **Cumulative balances in the account tree.** The sidebar shows each
-  account's own balance, not the roll-up of its children (e.g.
-  `Expenses:Food` shows nothing even when its sub-accounts have activity).
-  Use `realization.compute_balance` for parent nodes.
+- [ ] **Income statement view.** A screen (e.g. behind an `i` binding)
+  summarizing Income and Expenses accounts over a selectable period, with
+  per-account and net totals. `realization.realize` already provides the
+  tree; filter entries by date range before realizing.
+- [ ] **Balance sheet view.** Same idea for Assets/Liabilities/Equity at a
+  chosen date, including the implicit net-income line so it balances.
+- [ ] **Register view with running balance.** For the selected account, show
+  each transaction's posting amount and the cumulative balance after it —
+  what `bean-report register` gives on the CLI.
+- [ ] **Date-range presets for the filter.** Quick keys or tokens for
+  common ranges (this month, last month, this year) on top of the existing
+  `START..END` syntax.
 
-## Features
+## Ledger features
 
-- [x] **Search / filter.** Filter the transaction table by payee, narration,
-  or date range (e.g. a `/` binding opening a filter input).
-- [x] **Multi-file ledgers.** `replace_entry` already writes to the correct
-  file via the entry's `filename` metadata, but new transactions are always
-  appended to the top-level file. Let the user pick the target file when the
-  ledger uses `include` directives.
-- [x] **Edit non-transaction directives.** `open`, `close`, `balance`, `pad`,
-  and `note` directives are invisible in the UI. At minimum show them;
-  ideally make them editable through the same text-validation path.
-- [x] **Duplicate transaction.** A binding to copy the selected transaction
-  into the new-transaction form with today's date — the fastest way to enter
-  recurring transactions.
-- [x] **Account name completion in the form.** The postings `TextArea` is
-  free-text; offer completion from `Ledger.accounts`.
-- [x] **Auto-reload on external changes.** Watch the ledger file(s) and
-  reload when another editor writes to them, instead of relying on `r`.
-- [x] **Undo.** At minimum, an in-app undo for the last write (keep the
-  pre-write file content in memory).
+- [ ] **Tags and links.** Show `#tag` / `^link` on transactions (a table
+  column or detail row) and let the text filter match them.
+- [ ] **Commodities and prices.** Display `commodity` and `price` directives
+  (extend `DISPLAYED_DIRECTIVES`), and optionally show market-value
+  balances in the sidebar via `beancount.core.prices`.
+- [ ] **Balance-assertion helper.** A binding that inserts a `balance`
+  directive for the selected account pre-filled with the currently computed
+  amount — the fastest way to checkpoint an account after reconciling.
+- [ ] **Multi-level undo/redo.** Grow the single-slot undo into a bounded
+  history stack, with redo.
+
+## Import
+
+- [ ] **CSV import wizard.** Load a bank CSV, let the user map columns
+  (date/amount/payee/narration) and pick the target account, preview the
+  generated transactions, and append the ones they confirm. Deduplicate
+  against existing entries by date+amount.
+- [ ] **beangulp integration.** Once the built-in CSV path works, support
+  running the user's existing beangulp importers and reviewing their output
+  in the same preview flow.
+
+## UX polish
+
+- [ ] **Help screen.** A `?` binding listing all key bindings, since the
+  footer is getting crowded.
+- [ ] **Sortable columns.** Click or key-cycle the transaction table's sort
+  (date, payee, amount).
+- [ ] **Transaction detail panel.** Show the full source text (metadata,
+  cost basis, tags) of the selected entry, since the table row elides it.
 
 ## Tooling
 
-- [x] **CI.** Add a GitHub Actions workflow running `uv run pytest` and
-  `uv run ruff check .` — the repo currently has no CI.
-- [x] **Type checking.** Add mypy or pyright to the dev group and CI.
+- [ ] **Textual snapshot tests.** Add `pytest-textual-snapshot` to catch
+  visual regressions in the main screen and modals.
+- [ ] **Python version matrix in CI.** Test against 3.11, 3.12, and 3.13
+  instead of only the runner default.
+- [ ] **Coverage reporting.** Run pytest with `--cov` in CI and fail below a
+  threshold once the baseline is known.
+- [ ] **Package and publish.** Fill out project metadata (classifiers,
+  URLs), add a changelog, and publish to PyPI so `uvx beancount-tui` works.
