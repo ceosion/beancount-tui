@@ -7,7 +7,7 @@ CI with lint + mypy + tests — is done; see the git history for details.
 
 ## Reports & views
 
-- [ ] **Income statement view.** A screen (e.g. behind an `i` binding)
+- [x] **Income statement view.** A screen (e.g. behind an `i` binding)
   summarizing Income and Expenses accounts over a selectable period, with
   per-account and net totals. `realization.realize` already provides the
   tree; filter entries by date range before realizing.
