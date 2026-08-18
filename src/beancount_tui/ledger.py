@@ -16,6 +16,21 @@ DISPLAYED_DIRECTIVES = (data.Transaction, data.Open, data.Close, data.Balance, d
 
 
 @dataclass
+class IncomeStatement:
+    """Per-account and total Income/Expenses balances over a period.
+
+    Amounts follow reporting convention: income is sign-inverted so revenue
+    reads positive, and ``net`` is income minus expenses (positive = profit).
+    """
+
+    income: list[tuple[str, Inventory]]
+    expenses: list[tuple[str, Inventory]]
+    income_total: Inventory
+    expenses_total: Inventory
+    net: Inventory
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -75,6 +90,45 @@ class Ledger:
         included = {Path(name).resolve() for name in self.options.get("include", [])}
         return [top] + sorted(f for f in included if f != top)
 
+    def income_statement(
+        self,
+        start: datetime.date | None = None,
+        end: datetime.date | None = None,
+    ) -> IncomeStatement:
+        """Summarize Income and Expenses postings dated in [start, end]."""
+        name_income = self.options.get("name_income", "Income")
+        name_expenses = self.options.get("name_expenses", "Expenses")
+        per_account: dict[str, Inventory] = {}
+        for txn in self.transactions:
+            if start is not None and txn.date < start:
+                continue
+            if end is not None and txn.date > end:
+                continue
+            for posting in txn.postings:
+                root = posting.account.split(":", 1)[0]
+                if root not in (name_income, name_expenses):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                per_account.setdefault(posting.account, Inventory()).add_amount(posting.units)
+
+        income: list[tuple[str, Inventory]] = []
+        expenses: list[tuple[str, Inventory]] = []
+        income_total = Inventory()
+        expenses_total = Inventory()
+        for account in sorted(per_account):
+            balance = per_account[account]
+            if account.split(":", 1)[0] == name_income:
+                income.append((account, -balance))
+                income_total.add_inventory(-balance)
+            else:
+                expenses.append((account, balance))
+                expenses_total.add_inventory(balance)
+        net = Inventory()
+        net.add_inventory(income_total)
+        net.add_inventory(-expenses_total)
+        return IncomeStatement(income, expenses, income_total, expenses_total, net)
+
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""
         mtimes = {}
@@ -116,7 +170,7 @@ def filter_transactions(
     query = query.strip()
     if not query:
         return transactions
-    date_range = _parse_date_range(query)
+    date_range = parse_date_range(query)
     if date_range is not None:
         start, end = date_range
         return [
@@ -137,7 +191,7 @@ def _entry_search_text(entry: data.Directive) -> str:
     return " ".join(parts)
 
 
-def _parse_date_range(
+def parse_date_range(
     query: str,
 ) -> tuple[datetime.date | None, datetime.date | None] | None:
     """Parse ``START..END`` into dates, or ``None`` if it isn't a date range."""
@@ -154,6 +208,12 @@ def _parse_date_range(
     return start, end
 
 
+def format_inventory(inventory: Inventory) -> str:
+    """Render an inventory as ``1,234.56 USD, 20 EUR`` (empty string if empty)."""
+    positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
+    return ", ".join(f"{pos.units.number:,} {pos.units.currency}" for pos in positions)
+
+
 def transaction_amount(txn: data.Transaction) -> str:
     """A one-line summary of a transaction's magnitude, e.g. ``120.50 USD``.
 
@@ -165,5 +225,4 @@ def transaction_amount(txn: data.Transaction) -> str:
         if posting.units is not None and posting.units.number is not None:
             if posting.units.number > Decimal(0):
                 inventory.add_amount(posting.units)
-    positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
-    return ", ".join(f"{pos.units.number} {pos.units.currency}" for pos in positions)
+    return format_inventory(inventory)

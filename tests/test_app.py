@@ -13,6 +13,7 @@ from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -451,6 +452,41 @@ async def test_no_auto_reload_while_modal_open(ledger_path):
         await pilot.pause(0.5)
         # ...and it happens once the form closes.
         assert app.query_one(TransactionTable).row_count == 7
+
+
+async def test_income_statement_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IncomeStatementScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        assert any("Income:Salary" in c for c in cells(0))
+        assert any("Expenses:Rent" in c for c in cells(0))
+        assert "2,598.45 USD" in cells(1)  # net over all dates
+
+        # Narrowing the period recomputes the report.
+        screen.query_one("#period", Input).value = "2026-01-06..2026-01-10"
+        await pilot.pause()
+        assert "-1,537.35 USD" in cells(1)
+        assert not any("Income:Salary" in c for c in cells(0))
+
+        # An invalid period shows an error and keeps the last report.
+        screen.query_one("#period", Input).value = "not-a-range"
+        await pilot.pause()
+        assert "-1,537.35 USD" in cells(1)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, IncomeStatementScreen)
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

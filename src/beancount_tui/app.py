@@ -17,6 +17,7 @@ from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -58,6 +59,7 @@ class BeancountTUI(App):
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
         ("u", "undo", "Undo"),
+        ("i", "income_statement", "Income stmt"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
@@ -124,6 +126,9 @@ class BeancountTUI(App):
     def action_toggle_directives(self) -> None:
         self.show_directives = not self.show_directives
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+
+    def action_income_statement(self) -> None:
+        self.push_screen(IncomeStatementScreen(self.ledger))
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)

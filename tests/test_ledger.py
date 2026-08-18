@@ -1,6 +1,12 @@
+import datetime
 from decimal import Decimal
 
-from beancount_tui.ledger import Ledger, filter_transactions, transaction_amount
+from beancount_tui.ledger import (
+    Ledger,
+    filter_transactions,
+    format_inventory,
+    transaction_amount,
+)
 
 
 def test_load_example(ledger_path):
@@ -25,7 +31,7 @@ def test_transactions_for_account_none_returns_all(ledger_path):
 def test_transaction_amount(ledger_path):
     ledger = Ledger.load(ledger_path)
     rent = ledger.transactions_for_account("Expenses:Rent")[0]
-    assert transaction_amount(rent) == "1450.00 USD"
+    assert transaction_amount(rent) == "1,450.00 USD"
 
 
 def test_entries_for_account_includes_directives(ledger_path):
@@ -77,6 +83,35 @@ def test_filter_transactions_by_date_range(ledger_path):
 def test_filter_transactions_invalid_range_falls_back_to_text(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert filter_transactions(ledger.transactions, "not..a-date") == []
+
+
+def test_income_statement_all_dates(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    stmt = ledger.income_statement()
+    assert {a: format_inventory(b) for a, b in stmt.income} == {
+        "Income:Salary": "4,200.00 USD",
+    }
+    assert {a: format_inventory(b) for a, b in stmt.expenses} == {
+        "Expenses:Food:Groceries": "87.35 USD",
+        "Expenses:Food:Restaurant": "64.20 USD",
+        "Expenses:Rent": "1,450.00 USD",
+    }
+    assert format_inventory(stmt.income_total) == "4,200.00 USD"
+    assert format_inventory(stmt.expenses_total) == "1,601.55 USD"
+    assert format_inventory(stmt.net) == "2,598.45 USD"
+
+
+def test_income_statement_date_range(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    stmt = ledger.income_statement(
+        start=datetime.date(2026, 1, 6), end=datetime.date(2026, 1, 10)
+    )
+    assert not stmt.income
+    assert {a for a, _ in stmt.expenses} == {
+        "Expenses:Food:Groceries",
+        "Expenses:Rent",
+    }
+    assert format_inventory(stmt.net) == "-1,537.35 USD"
 
 
 def test_root_account_has_balances(ledger_path):
