@@ -497,7 +497,7 @@ async def test_account_tree_rolls_up_child_balances(ledger_path):
         food = _find_node(tree.root, "Expenses:Food")
         assert food is not None
         # 87.35 groceries + 64.20 restaurant, none posted to Expenses:Food itself.
-        assert "151.55 USD" in str(food.label)
+        assert "151.55 USD" in tree._amounts[food.id]
 
 
 def _find_node(node, account):

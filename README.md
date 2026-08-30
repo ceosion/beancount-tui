@@ -32,6 +32,14 @@ from source, which needs a C compiler plus `flex` and `bison`:
 
 ```sh
 pkg install clang flex bison    # Termux
+brew install flex bison         # macOS (the system bison 2.3 is too old)
+```
+
+On macOS, Homebrew's `flex` and `bison` are keg-only, so add them to your
+`PATH` before running `uv sync`:
+
+```sh
+export PATH="/opt/homebrew/opt/bison/bin:/opt/homebrew/opt/flex/bin:$PATH"
 ```
 
 (The dependency is capped at `beancount<3.2.1` because later releases can
