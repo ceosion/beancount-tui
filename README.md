@@ -76,6 +76,19 @@ uv run pytest          # run tests
 uv run ruff check .    # lint
 ```
 
+### Snapshot tests
+
+`tests/test_snapshots.py` renders the main screen and every modal (transaction
+form, directive form, confirm dialog, income statement, directive type
+picker, ledger info) to SVG and compares it against a baseline committed
+under `tests/__snapshots__/`, to catch visual regressions that functional
+tests miss. After an intentional UI change, regenerate the baselines and
+review the diff before committing:
+
+```sh
+uv run pytest --snapshot-update
+```
+
 ## How editing works
 
 Beancount itself is read-only: the library parses and validates ledgers but

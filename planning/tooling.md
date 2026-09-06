@@ -6,7 +6,7 @@ Project infrastructure, not user-facing features.
 
 ### TOOL-01: Textual snapshot tests
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -16,11 +16,11 @@ form, confirm dialog, income statement), to catch visual regressions that
 functional tests miss.
 
 **Acceptance criteria:**
-- [ ] `pytest-textual-snapshot` added to the dev dependency group.
-- [ ] Baseline snapshots committed for the main screen and every existing
+- [x] `pytest-textual-snapshot` added to the dev dependency group.
+- [x] Baseline snapshots committed for the main screen and every existing
       modal screen.
-- [ ] CI runs snapshot tests and fails on unreviewed diffs.
-- [ ] `README`/`CLAUDE.md` note how to regenerate snapshots after an
+- [x] CI runs snapshot tests and fails on unreviewed diffs.
+- [x] `README`/`CLAUDE.md` note how to regenerate snapshots after an
       intentional UI change.
 
 ---

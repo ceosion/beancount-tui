@@ -32,3 +32,5 @@ Data flows one way: widgets render from the `Ledger`, edits go through `editor.p
 ## Testing
 
 Tests in `tests/` use a throwaway copy of `examples/example.beancount` (see the `ledger_path` fixture in `conftest.py`). `test_app.py` drives the real app end-to-end with Textual's `run_test()` pilot, including submitting the transaction form. `asyncio_mode = "auto"` is set, so async tests need no decorator.
+
+`test_snapshots.py` uses `pytest-textual-snapshot` to catch visual regressions: it renders the main screen and every modal to SVG and compares against a baseline committed under `tests/__snapshots__/`. Unlike the other tests, it opens the ledger directly at the fixed relative path `examples/example.beancount` (not the tmp_path-based `ledger_path` fixture) so the rendered header text is identical on every machine, and freezes `datetime.date.today()` since new-transaction/new-directive forms default their date field to today. After an intentional UI change, regenerate the baselines with `uv run pytest --snapshot-update` and review the diff before committing.
