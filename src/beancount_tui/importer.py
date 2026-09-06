@@ -7,7 +7,10 @@ candidate — with ``error`` set — rather than aborting the whole import, so
 one bad row in a bank export doesn't block the rest.
 
 This module only builds the in-memory candidate list; nothing here writes
-to the ledger (that's a later stage).
+to the ledger (that's a later stage). It also exposes
+:func:`find_duplicate_reason`, a pure date+amount(+account) check against a
+list of already-loaded transactions, used by the review screen to flag
+candidates that look like they're already in the ledger.
 """
 
 from __future__ import annotations
@@ -17,6 +20,8 @@ import datetime
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
+
+from beancount.core import data
 
 
 @dataclass
@@ -119,3 +124,35 @@ def _parse_row(
         row_number=row_number,
         error="; ".join(problems) or None,
     )
+
+
+def find_duplicate_reason(
+    candidate: ImportCandidate, existing: list[data.Transaction]
+) -> str | None:
+    """Human-readable reason if ``candidate`` looks like it's already in the ledger.
+
+    Matches by date + amount posted to the candidate's target account: if any
+    transaction in ``existing`` has a posting on ``candidate.account`` dated
+    exactly ``candidate.date`` with a numerically identical amount to
+    ``candidate.amount``, that's almost certainly the same real-world
+    transaction (e.g. importing the same bank statement twice), so a reason
+    string is returned describing which existing entry it matches. Matching is
+    exact (no fuzzing of date or amount) — keeping it simple and predictable.
+
+    Returns ``None`` if the candidate has no parsed date/amount (already
+    flagged separately via ``error``) or no match is found.
+    """
+    if candidate.date is None or candidate.amount is None:
+        return None
+    for txn in existing:
+        if txn.date != candidate.date:
+            continue
+        for posting in txn.postings:
+            if posting.account != candidate.account:
+                continue
+            if posting.units is None or posting.units.number is None:
+                continue
+            if posting.units.number == candidate.amount:
+                label = txn.narration or txn.payee or "entry"
+                return f"possible duplicate of {txn.date.isoformat()} {label}"
+    return None

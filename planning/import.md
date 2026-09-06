@@ -52,7 +52,7 @@ to the appropriate target file.
 
 ### IMP-03: Duplicate detection against existing entries
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** IMP-01
 - **Effort:** 1h
 
@@ -63,10 +63,10 @@ unchecked, with a visible reason (e.g. "possible duplicate of 2026-08-03
 entry").
 
 **Acceptance criteria:**
-- [ ] Candidates matching an existing transaction by date+amount(+account)
+- [x] Candidates matching an existing transaction by date+amount(+account)
       are flagged and default to unchecked in the `IMP-02` preview.
-- [ ] The match reason/reference is visible to the user.
-- [ ] Test covering a candidate that duplicates a fixture ledger entry.
+- [x] The match reason/reference is visible to the user.
+- [x] Test covering a candidate that duplicates a fixture ledger entry.
 
 ---
 

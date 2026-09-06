@@ -3,7 +3,12 @@
 Lists every :class:`~beancount_tui.importer.ImportCandidate` produced by
 :class:`~beancount_tui.widgets.import_form.ImportForm`, each behind a
 checkbox (checked by default; rows with a parse ``error`` from IMP-01 start
-unchecked, since they can't be cleanly imported without a fix first). Any
+unchecked, since they can't be cleanly imported without a fix first). Rows
+that look like a duplicate of an existing ledger transaction — same date and
+amount posted to the same account, per
+:func:`~beancount_tui.importer.find_duplicate_reason` (IMP-03) — also start
+unchecked, with the match shown alongside the row so the user can tell why
+and re-check it if it's a false positive. Any
 row can be opened in :class:`~beancount_tui.widgets.transaction_form.TransactionForm`
 for edits before import — most CSV exports only tell you one side of the
 posting, so each candidate is seeded with a placeholder balancing leg
@@ -23,13 +28,14 @@ import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from beancount.core import data
 from textual.app import ComposeResult
 from textual.containers import Horizontal, ScrollableContainer, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Checkbox, Label, Static
 
 from beancount_tui.editor import TransactionParseError, format_entry, parse_transaction_text
-from beancount_tui.importer import ImportCandidate
+from beancount_tui.importer import ImportCandidate, find_duplicate_reason
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 
 
@@ -56,7 +62,9 @@ def _tags_links_text(txn) -> str:  # noqa: ANN001 - beancount data.Transaction
     return " ".join(tokens)
 
 
-def _candidate_label(candidate: ImportCandidate, *, edited: bool = False) -> str:
+def _candidate_label(
+    candidate: ImportCandidate, *, edited: bool = False, duplicate_reason: str | None = None
+) -> str:
     date = candidate.date.isoformat() if candidate.date else "????-??-??"
     amount = f"{candidate.amount} " if candidate.amount is not None else "? "
     payee = f'"{candidate.payee}" ' if candidate.payee else ""
@@ -65,6 +73,8 @@ def _candidate_label(candidate: ImportCandidate, *, edited: bool = False) -> str
         label += "  (edited)"
     if candidate.error:
         label += f"  [error: {candidate.error}]"
+    elif duplicate_reason:
+        label += f"  [{duplicate_reason}]"
     return label
 
 
@@ -83,9 +93,13 @@ class _Row:
     postings_text: str
     text: str
     edited: bool = field(default=False)
+    duplicate_reason: str | None = None
 
 
-def _row_from_candidate(candidate: ImportCandidate) -> _Row:
+def _row_from_candidate(
+    candidate: ImportCandidate,
+    existing_transactions: list[data.Transaction] | None = None,
+) -> _Row:
     date = candidate.date.isoformat() if candidate.date else datetime.date.today().isoformat()
     flag = "*"
     payee = candidate.payee
@@ -94,9 +108,10 @@ def _row_from_candidate(candidate: ImportCandidate) -> _Row:
     amount = candidate.amount if candidate.amount is not None else Decimal("0.00")
     postings_text = f"{candidate.account}  {amount} USD\nExpenses:FIXME"
     text = _assemble_transaction_text(date, flag, payee, narration, tags_links, postings_text)
+    duplicate_reason = find_duplicate_reason(candidate, existing_transactions or [])
     return _Row(
         candidate=candidate,
-        checked=candidate.error is None,
+        checked=candidate.error is None and duplicate_reason is None,
         date=date,
         flag=flag,
         payee=payee,
@@ -104,6 +119,7 @@ def _row_from_candidate(candidate: ImportCandidate) -> _Row:
         tags_links=tags_links,
         postings_text=postings_text,
         text=text,
+        duplicate_reason=duplicate_reason,
     )
 
 
@@ -150,11 +166,17 @@ class ImportReviewScreen(ModalScreen[list[str] | None]):
     """
 
     def __init__(
-        self, candidates: list[ImportCandidate], *, accounts: list[str] | None = None
+        self,
+        candidates: list[ImportCandidate],
+        *,
+        accounts: list[str] | None = None,
+        existing_transactions: list[data.Transaction] | None = None,
     ) -> None:
         super().__init__()
         self._accounts = accounts or []
-        self._rows: list[_Row] = [_row_from_candidate(c) for c in candidates]
+        self._rows: list[_Row] = [
+            _row_from_candidate(c, existing_transactions) for c in candidates
+        ]
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -163,7 +185,7 @@ class ImportReviewScreen(ModalScreen[list[str] | None]):
                 for i, row in enumerate(self._rows):
                     with Horizontal(classes="row"):
                         yield Checkbox(
-                            _candidate_label(row.candidate),
+                            _candidate_label(row.candidate, duplicate_reason=row.duplicate_reason),
                             value=row.checked,
                             id=f"check-{i}",
                         )
@@ -205,7 +227,9 @@ class ImportReviewScreen(ModalScreen[list[str] | None]):
                 row.postings_text = _postings_text(txn)
             checkbox = self.query_one(f"#check-{index}", Checkbox)
             checkbox.value = True
-            checkbox.label = _candidate_label(row.candidate, edited=True)
+            checkbox.label = _candidate_label(
+                row.candidate, edited=True, duplicate_reason=row.duplicate_reason
+            )
 
         self.app.push_screen(
             TransactionForm(
