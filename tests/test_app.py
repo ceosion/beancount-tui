@@ -19,6 +19,7 @@ from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
+from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.register import RegisterScreen
@@ -1426,6 +1427,47 @@ async def test_balance_sheet_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, BalanceSheetScreen)
+
+
+async def test_holdings_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n\n"
+        "2026-02-01 price HOOL  550.00 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, HoldingsScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        # As-of defaults to today, so the price directive is in scope.
+        assert any("HOOL" in c for c in cells(0))
+        assert any("Assets:Investments" in c for c in cells(1))
+        assert "5,000.00 USD" in cells(3)  # cost basis
+        assert "5,500.00 USD" in cells(4)  # market value
+        assert any("Net worth" in c for c in cells(0))
+        assert "5,500.00 USD" in cells(4)
+
+        # Before the price directive posted, the lot has no known market value.
+        screen.query_one("#as-of", Input).value = "2026-01-20"
+        await pilot.pause()
+        assert any("no price available" in c for c in cells(4))
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HoldingsScreen)
 
 
 async def test_ledger_info_screen(ledger_path):
