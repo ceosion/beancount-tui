@@ -22,6 +22,7 @@ from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.import_form import ImportForm
+from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
@@ -172,17 +173,29 @@ class BeancountTUI(App):
         self.push_screen(HelpScreen(self.BINDINGS))
 
     def action_import_csv(self) -> None:
-        def on_result(candidates: list[ImportCandidate] | None) -> None:
+        def on_candidates(candidates: list[ImportCandidate] | None) -> None:
             if candidates is None:
                 return
-            errors = sum(1 for c in candidates if c.error)
-            summary = f"Parsed {len(candidates)} row(s)"
-            if errors:
-                summary += f", {errors} with errors"
-            summary += "."
-            self.notify(summary)
 
-        self.push_screen(ImportForm(), on_result)
+            def on_review(texts: list[str] | None) -> None:
+                if texts is None:
+                    return
+                if texts:
+                    self._snapshot_for_undo(self.ledger.path)
+                    for text in texts:
+                        append_entry(self.ledger.path, text)
+                self.action_reload()
+                skipped = len(candidates) - len(texts)
+                summary = f"Imported {len(texts)} transaction(s)."
+                if skipped:
+                    summary += f" Skipped {skipped}."
+                self.notify(summary)
+
+            self.push_screen(
+                ImportReviewScreen(candidates, accounts=self.ledger.accounts), on_review
+            )
+
+        self.push_screen(ImportForm(), on_candidates)
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)

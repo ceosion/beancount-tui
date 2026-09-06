@@ -4,7 +4,7 @@ import datetime
 from pathlib import Path
 
 from beancount.core import data
-from textual.widgets import DataTable, OptionList, Select
+from textual.widgets import Checkbox, DataTable, OptionList, Select
 
 from beancount_tui.app import BeancountTUI
 from beancount_tui.editor import append_entry
@@ -14,6 +14,7 @@ from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.import_form import ImportForm
+from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
@@ -1205,7 +1206,7 @@ async def test_import_csv_via_form(ledger_path):
     assert len(ledger.transactions) == 6
 
 
-async def test_import_csv_binding_notifies_summary(ledger_path):
+async def test_import_csv_binding_opens_review_screen(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -1227,3 +1228,116 @@ async def test_import_csv_binding_notifies_summary(ledger_path):
         await pilot.pause()
 
         assert not isinstance(app.screen, ImportForm)
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+        assert len(review._rows) == 5
+
+        # Confirming with nothing changed still leaves the review screen and
+        # notifies with a count, exercising the full "m" -> review -> import path.
+        review._do_import()
+        await pilot.pause()
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+
+def _import_review_setup_and_parse(form) -> None:
+    form.query_one("#path").value = str(FIXTURE_CSV)
+    form._load_preview()
+    form.query_one("#col-date", Select).value = "Date"
+    form.query_one("#col-amount", Select).value = "Amount"
+    form.query_one("#col-payee", Select).value = "Merchant"
+    form.query_one("#col-narration", Select).value = "Description"
+    form.query_one("#account").value = "Assets:Checking"
+
+
+async def test_import_review_partial_selection(ledger_path):
+    """Uncheck one candidate before confirming: it's skipped, the rest are appended."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+        _import_review_setup_and_parse(form)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+        assert len(review._rows) == 5
+
+        # Rows 3/4 (bad date / bad amount) carry a parse error and default unchecked.
+        assert review._rows[0].checked is True  # Corner Cafe
+        assert review._rows[1].checked is True  # Green Grocer
+        assert review._rows[2].checked is False  # bad date row
+        assert review._rows[3].checked is False  # bad amount row
+        assert review._rows[4].checked is True  # Acme Corp paycheck
+
+        # Deselect the Corner Cafe row: it should be skipped, not appended.
+        review.query_one("#check-0", Checkbox).value = False
+        await pilot.pause()
+        assert review._rows[0].checked is False
+
+        review._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+    ledger = Ledger.load(ledger_path)
+    # Started with 6 transactions; Green Grocer + Acme Corp paycheck get appended,
+    # Corner Cafe (unchecked) and the two errored rows (default unchecked) do not.
+    assert len(ledger.transactions) == 8
+    narrations = {t.narration for t in ledger.transactions}
+    assert "Weekly groceries" in narrations
+    assert "Paycheck" in narrations
+    assert "Coffee and pastry" not in narrations
+    assert "Bad date row" not in narrations
+    assert "Bad amount row" not in narrations
+
+
+async def test_import_review_edit_before_import(ledger_path):
+    """A candidate can be opened in TransactionForm and edited before import."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+        _import_review_setup_and_parse(form)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+
+        # Edit the Corner Cafe row: replace the placeholder balancing account.
+        review._open_edit(0)
+        await pilot.pause()
+        edit_form = app.screen
+        assert isinstance(edit_form, TransactionForm)
+        postings = edit_form.query_one("#postings", PostingsArea)
+        assert "Expenses:FIXME" in postings.text
+        postings.text = postings.text.replace("Expenses:FIXME", "Expenses:Food:Restaurant")
+        edit_form._save()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, TransactionForm)
+        assert review._rows[0].edited is True
+        assert "Expenses:Food:Restaurant" in review._rows[0].text
+        assert review._rows[0].checked is True
+
+        review._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+    ledger = Ledger.load(ledger_path)
+    edited_txn = next(t for t in ledger.transactions if t.payee == "Corner Cafe")
+    accounts = {p.account for p in edited_txn.postings}
+    assert "Expenses:Food:Restaurant" in accounts
+    assert "Expenses:FIXME" not in accounts
