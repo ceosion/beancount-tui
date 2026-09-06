@@ -1,7 +1,7 @@
 """Table of ledger entries for the selected account.
 
 Shows transactions and, when the app's directives toggle is on, the
-account-level directives (open, close, balance, pad, note) as well.
+account-level directives (open, close, balance, pad, note, query) as well.
 """
 
 from __future__ import annotations
@@ -60,4 +60,9 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         return (date, "pad", "", f"{entry.account} from {entry.source_account}", "")
     if isinstance(entry, data.Note):
         return (date, "note", "", f"{entry.account}: {entry.comment}", "")
+    if isinstance(entry, data.Query):
+        query_text = entry.query_string
+        if len(query_text) > 40:
+            query_text = f"{query_text[:40]}..."
+        return (date, "query", "", f"{entry.name}: {query_text}", "")
     return (date, type(entry).__name__.lower(), "", "", "")

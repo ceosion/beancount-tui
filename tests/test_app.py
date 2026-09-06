@@ -367,7 +367,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         assert isinstance(picker, DirectiveTypePicker)
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
-        assert ids == {"open", "close", "balance", "pad", "note"}
+        assert ids == {"open", "close", "balance", "pad", "note", "query"}
 
         await pilot.press("escape")
         await pilot.pause()
@@ -488,6 +488,51 @@ async def test_add_note_directive(ledger_path):
     assert not ledger.errors
     notes = [e for e in ledger.entries if isinstance(e, data.Note)]
     assert any(n.comment == "Reviewed year to date" for n in notes)
+
+
+async def test_query_directive_display(ledger_path):
+    long_query_text = "SELECT account, sum(position) GROUP BY account ORDER BY account"
+    append_entry(ledger_path, f'2026-09-06 query "cash" "{long_query_text}"')
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        query_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Query)
+        )
+        row = table.get_row_at(query_row)
+        assert row[1] == "query"
+        assert row[3] == f"cash: {long_query_text[:40]}..."
+
+
+async def test_add_query_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "query")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'query "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 query "cash" "SELECT account, sum(position) GROUP BY account"'
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    queries = [e for e in ledger.entries if isinstance(e, data.Query)]
+    assert any(
+        q.name == "cash" and q.query_string == "SELECT account, sum(position) GROUP BY account"
+        for q in queries
+    )
 
 
 async def test_add_directive_into_included_file(multi_ledger_path):

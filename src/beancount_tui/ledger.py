@@ -12,7 +12,15 @@ from beancount.core import data, getters, realization
 from beancount.core.inventory import Inventory
 
 
-DISPLAYED_DIRECTIVES = (data.Transaction, data.Open, data.Close, data.Balance, data.Pad, data.Note)
+DISPLAYED_DIRECTIVES = (
+    data.Transaction,
+    data.Open,
+    data.Close,
+    data.Balance,
+    data.Pad,
+    data.Note,
+    data.Query,
+)
 
 
 @dataclass
