@@ -1,15 +1,18 @@
 """Table of ledger entries for the selected account.
 
 Shows transactions and, when the app's directives toggle is on, the
-account-level directives (open, close, balance, pad, note) as well.
+account-level directives (open, close, balance, pad, note, query, commodity)
+as well.
 """
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from beancount.core import data
 from textual.widgets import DataTable
 
-from beancount_tui.ledger import transaction_amount
+from beancount_tui.ledger import has_user_metadata, transaction_amount
 
 
 class TransactionTable(DataTable):
@@ -47,7 +50,13 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
     """
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
-        return (date, entry.flag or "*", entry.payee or "", entry.narration or "",
+        narration = entry.narration or ""
+        tags_links = _tags_links_summary(entry)
+        if tags_links:
+            narration = f"{narration} {tags_links}".strip()
+        if has_user_metadata(entry):
+            narration = f"{narration} +".strip()
+        return (date, entry.flag or "*", entry.payee or "", narration,
                 transaction_amount(entry))
     if isinstance(entry, data.Open):
         return (date, "open", "", entry.account, ", ".join(entry.currencies or []))
@@ -60,4 +69,36 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         return (date, "pad", "", f"{entry.account} from {entry.source_account}", "")
     if isinstance(entry, data.Note):
         return (date, "note", "", f"{entry.account}: {entry.comment}", "")
+    if isinstance(entry, data.Price):
+        return (date, "price", "", entry.currency,
+                f"{entry.amount.number} {entry.amount.currency}")
+    if isinstance(entry, data.Event):
+        return (date, "event", "", f'"{entry.type}": "{entry.description}"', "")
+    if isinstance(entry, data.Custom):
+        values = ", ".join(str(v.value) for v in entry.values)
+        return (date, "custom", "", f"{entry.type}: {values}", "")
+    if isinstance(entry, data.Query):
+        query_text = entry.query_string
+        if len(query_text) > 40:
+            query_text = f"{query_text[:40]}..."
+        return (date, "query", "", f"{entry.name}: {query_text}", "")
+    if isinstance(entry, data.Commodity):
+        name = entry.meta.get("name") if entry.meta else None
+        summary = f"{entry.currency} ({name})" if name else entry.currency
+        return (date, "commodity", "", summary, "")
+    if isinstance(entry, data.Document):
+        summary = f"{entry.account}: {entry.filename}"
+        # Beancount resolves ``filename`` to an absolute path (relative to the
+        # directory of the file that declared the directive) before this ever
+        # reaches us, so a plain existence check is all that's needed here.
+        if not Path(entry.filename).exists():
+            summary = f"! {summary}"
+        return (date, "document", "", summary, "")
     return (date, type(entry).__name__.lower(), "", "", "")
+
+
+def _tags_links_summary(entry: data.Transaction) -> str:
+    """Render a transaction's tags/links as ``#tag ^link`` text for display."""
+    tokens = [f"#{tag}" for tag in sorted(entry.tags or ())]
+    tokens += [f"^{link}" for link in sorted(entry.links or ())]
+    return " ".join(tokens)

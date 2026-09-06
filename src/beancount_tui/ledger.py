@@ -12,7 +12,20 @@ from beancount.core import data, getters, realization
 from beancount.core.inventory import Inventory
 
 
-DISPLAYED_DIRECTIVES = (data.Transaction, data.Open, data.Close, data.Balance, data.Pad, data.Note)
+DISPLAYED_DIRECTIVES = (
+    data.Transaction,
+    data.Open,
+    data.Close,
+    data.Balance,
+    data.Pad,
+    data.Note,
+    data.Price,
+    data.Event,
+    data.Custom,
+    data.Query,
+    data.Document,
+    data.Commodity,
+)
 
 
 @dataclass
@@ -182,12 +195,44 @@ def filter_transactions(
     return [txn for txn in transactions if needle in _entry_search_text(txn).lower()]
 
 
+_META_KEYS_EXCLUDED = ("filename", "lineno")
+
+
+def _user_meta_values(meta: dict | None) -> list[str]:
+    """Values of user-added metadata keys, excluding parser-added ones.
+
+    Every entry's ``meta`` dict always carries ``filename``/``lineno`` from
+    the parser; those aren't user metadata.
+    """
+    if not meta:
+        return []
+    return [str(v) for k, v in meta.items() if k not in _META_KEYS_EXCLUDED]
+
+
+def has_user_metadata(entry: data.Directive) -> bool:
+    """Whether ``entry`` (or, for transactions, any of its postings) carries
+    user-added metadata beyond the standard filename/lineno fields."""
+    if _user_meta_values(entry.meta):
+        return True
+    if isinstance(entry, data.Transaction):
+        return any(_user_meta_values(posting.meta) for posting in entry.postings)
+    return False
+
+
 def _entry_search_text(entry: data.Directive) -> str:
     if isinstance(entry, data.Transaction):
-        return f"{entry.payee or ''} {entry.narration or ''}"
+        parts = [entry.payee or "", entry.narration or "", *_user_meta_values(entry.meta)]
+        for posting in entry.postings:
+            parts.extend(_user_meta_values(posting.meta))
+        if entry.tags:
+            parts.extend(sorted(entry.tags))
+        if entry.links:
+            parts.extend(sorted(entry.links))
+        return " ".join(parts)
     parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
     if isinstance(entry, data.Note):
         parts.append(entry.comment)
+    parts.extend(_user_meta_values(entry.meta))
     return " ".join(parts)
 
 
@@ -218,11 +263,24 @@ def transaction_amount(txn: data.Transaction) -> str:
     """A one-line summary of a transaction's magnitude, e.g. ``120.50 USD``.
 
     Sums the absolute value of positive postings per currency; transactions
-    always balance, so this is the amount that changed hands.
+    always balance, so this is the amount that changed hands. Postings with a
+    cost basis (``10 HOOL {500.00 USD}``) or a price annotation
+    (``10 HOOL @ 55.00 USD``) contribute their cost/price currency amount
+    (e.g. ``5,000.00 USD``) rather than the raw commodity quantity, since
+    that's far more useful for at-a-glance scanning.
     """
     inventory = Inventory()
     for posting in txn.postings:
         if posting.units is not None and posting.units.number is not None:
             if posting.units.number > Decimal(0):
-                inventory.add_amount(posting.units)
+                amount = posting.units
+                if posting.cost is not None and posting.cost.number is not None:
+                    amount = data.Amount(
+                        amount.number * posting.cost.number, posting.cost.currency
+                    )
+                elif posting.price is not None and posting.price.number is not None:
+                    amount = data.Amount(
+                        amount.number * posting.price.number, posting.price.currency
+                    )
+                inventory.add_amount(amount)
     return format_inventory(inventory)

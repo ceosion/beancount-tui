@@ -3,19 +3,30 @@
 import datetime
 
 from beancount.core import data
-from textual.widgets import Select
+from textual.widgets import OptionList, Select
 
 from beancount_tui.app import BeancountTUI
-from beancount_tui.editor import append_transaction
+from beancount_tui.editor import append_entry
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
+from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
-from beancount_tui.widgets.transaction_table import TransactionTable
+from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
+
+
+async def _pick_directive_type(pilot, keyword: str) -> None:
+    picker = pilot.app.screen
+    assert isinstance(picker, DirectiveTypePicker)
+    option_list = picker.query_one(OptionList)
+    option_list.highlighted = option_list.get_option_index(keyword)
+    await pilot.press("enter")
+    await pilot.pause()
 
 
 async def test_app_launches_and_shows_transactions(ledger_path):
@@ -72,7 +83,7 @@ async def test_edit_transaction_via_form(ledger_path):
 
 
 async def test_edit_preserves_pending_flag(ledger_path):
-    append_transaction(
+    append_entry(
         ledger_path,
         '2026-01-16 ! "Pending Shop" "Awaiting confirmation"\n'
         "  Expenses:Food:Groceries  10.00 USD\n"
@@ -97,6 +108,94 @@ async def test_edit_preserves_pending_flag(ledger_path):
     assert not ledger.errors
     assert ledger.transactions[-1].flag == "!"
     assert ledger.transactions[-1].narration == "Awaiting confirmation (edited)"
+
+
+async def test_new_transaction_with_tags_links_via_form(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        form.query_one("#tags_links").value = "#vacation ^receipt-123"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+        )
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.narration == "Coffee"
+    assert txn.tags == frozenset({"vacation"})
+    assert txn.links == frozenset({"receipt-123"})
+
+
+async def test_edit_transaction_tags_links_via_form(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Corner Cafe" "Coffee" #vacation ^receipt-123\n'
+        "  Expenses:Food:Restaurant  4.50 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=table.row_count - 1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#tags_links").value == "#vacation ^receipt-123"
+
+        form.query_one("#tags_links").value = "#work"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.tags == frozenset({"work"})
+    assert txn.links == frozenset()
+
+
+async def test_filter_by_tag(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Corner Cafe" "Coffee" #vacation\n'
+        "  Expenses:Food:Restaurant  4.50 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.press(*"vacation")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Corner Cafe"
+
+
+def test_entry_row_shows_tags_and_links():
+    txn = data.Transaction(
+        meta={},
+        date=datetime.date(2026, 1, 16),
+        flag="*",
+        payee="Corner Cafe",
+        narration="Coffee",
+        tags=frozenset({"vacation"}),
+        links=frozenset({"receipt-123"}),
+        postings=[],
+    )
+    row = _entry_row(txn)
+    assert row[3] == "Coffee #vacation ^receipt-123"
 
 
 async def test_delete_transaction_with_confirmation(ledger_path):
@@ -214,6 +313,29 @@ async def test_filter_via_filter_bar(ledger_path):
         await pilot.pause()
         assert table.row_count == 6
         assert not bar.has_class("visible")
+
+
+async def test_filter_by_metadata_value(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Widget Co" "Gadget purchase"\n'
+        '  invoice-ref: "zephyrinvoice"\n'
+        "  Assets:Checking  -15.00 USD\n"
+        "  Expenses:Food:Groceries  15.00 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        await pilot.press(*"zephyrinvoice")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Widget Co"
+        # The narration cell surfaces a marker for the extra metadata.
+        row = _entry_row(table.shown[0])
+        assert row[3].endswith("+")
 
 
 async def test_filter_combines_with_account_selection(ledger_path):
@@ -347,6 +469,428 @@ async def test_edit_note_directive(ledger_path):
     assert not Ledger.load(ledger_path).errors
 
 
+async def test_add_directive_type_picker_lists_types(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, DirectiveTypePicker)
+        option_list = picker.query_one(OptionList)
+        ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
+        assert ids == {
+            "open", "close", "balance", "pad", "note", "price", "event", "custom", "query",
+            "document", "commodity",
+        }
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, DirectiveTypePicker)
+
+
+async def test_add_open_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "open")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "open Assets:FIXME" in form.query_one("#text").text
+
+        form.query_one("#text").text = "2026-09-06 open Assets:NewAccount  USD"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    opens = [e for e in ledger.entries if isinstance(e, data.Open)]
+    assert any(o.account == "Assets:NewAccount" for o in opens)
+
+
+async def test_add_close_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "close")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        form.query_one("#text").text = "2026-09-06 close Assets:Savings"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    closes = [e for e in ledger.entries if isinstance(e, data.Close)]
+    assert any(c.account == "Assets:Savings" for c in closes)
+
+
+async def test_add_balance_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "balance")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "balance Assets:FIXME" in form.query_one("#text").text
+
+        # Assets:Checking's balance after the example ledger's transactions.
+        form.query_one("#text").text = "2026-09-06 balance Assets:Checking  4098.45 USD"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    balances = [e for e in ledger.entries if isinstance(e, data.Balance)]
+    assert any(
+        b.account == "Assets:Checking" and str(b.amount.number) == "4098.45"
+        for b in balances
+    )
+
+
+async def test_add_pad_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "pad")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "pad Assets:FIXME Equity:Opening-Balances" in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            "2026-09-06 pad Assets:Savings Equity:Opening-Balances"
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    pads = [e for e in ledger.entries if isinstance(e, data.Pad)]
+    assert any(
+        p.account == "Assets:Savings" and p.source_account == "Equity:Opening-Balances"
+        for p in pads
+    )
+
+
+async def test_add_note_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "note")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        form.query_one("#text").text = (
+            '2026-09-06 note Assets:Checking "Reviewed year to date"'
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    notes = [e for e in ledger.entries if isinstance(e, data.Note)]
+    assert any(n.comment == "Reviewed year to date" for n in notes)
+
+
+async def test_add_price_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "price")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "price FIXME" in form.query_one("#text").text
+
+        form.query_one("#text").text = "2026-09-06 price HOOL  100.00 USD"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    prices = [e for e in ledger.entries if isinstance(e, data.Price)]
+    assert any(
+        p.currency == "HOOL" and str(p.amount.number) == "100.00" and p.amount.currency == "USD"
+        for p in prices
+    )
+
+
+async def test_price_directive_displayed_in_table(ledger_path):
+    append_entry(ledger_path, "2026-09-06 price HOOL  100.00 USD")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        row_index = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Price)
+        )
+        row = table.get_row_at(row_index)
+        assert tuple(row) == ("2026-09-06", "price", "", "HOOL", "100.00 USD")
+
+
+async def test_add_event_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "event")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'event "location" "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = '2026-09-06 event "location" "Paris"'
+        form._save()
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        event_row = next(i for i, e in enumerate(table.shown) if isinstance(e, data.Event))
+        row = table.get_row_at(event_row)
+        assert row[1] == "event"
+        assert row[3] == '"location": "Paris"'
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    events = [e for e in ledger.entries if isinstance(e, data.Event)]
+    assert any(e.type == "location" and e.description == "Paris" for e in events)
+
+
+async def test_add_custom_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "custom")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'custom "budget" "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 custom "budget" "Groceries" 500.00 USD'
+        )
+        form._save()
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        row = next(e for e in table.shown if isinstance(e, data.Custom))
+        assert _entry_row(row) == (
+            "2026-09-06",
+            "custom",
+            "",
+            'budget: Groceries, 500.00 USD',
+            "",
+        )
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    customs = [e for e in ledger.entries if isinstance(e, data.Custom)]
+    assert any(
+        c.type == "budget"
+        and c.values[0].value == "Groceries"
+        and str(c.values[1].value) == "500.00 USD"
+        for c in customs
+    )
+
+
+async def test_query_directive_display(ledger_path):
+    long_query_text = "SELECT account, sum(position) GROUP BY account ORDER BY account"
+    append_entry(ledger_path, f'2026-09-06 query "cash" "{long_query_text}"')
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        query_row = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Query)
+        )
+        row = table.get_row_at(query_row)
+        assert row[1] == "query"
+        assert row[3] == f"cash: {long_query_text[:40]}..."
+
+
+async def test_add_query_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "query")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'query "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 query "cash" "SELECT account, sum(position) GROUP BY account"'
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    queries = [e for e in ledger.entries if isinstance(e, data.Query)]
+    assert any(
+        q.name == "cash" and q.query_string == "SELECT account, sum(position) GROUP BY account"
+        for q in queries
+    )
+
+
+async def test_add_directive_into_included_file(multi_ledger_path):
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "note")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        form.query_one("#text").text = (
+            '2026-01-06 note Expenses:Food:Groceries "Filed receipt"'
+        )
+        form.query_one("#target-file", Select).value = str(food)
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+    assert "Filed receipt" in food.read_text()
+    assert "Filed receipt" not in multi_ledger_path.read_text()
+    assert not Ledger.load(multi_ledger_path).errors
+
+
+def test_document_directive_row_flags_missing_file(tmp_path):
+    from beancount_tui.widgets.transaction_table import _entry_row
+
+    existing = tmp_path / "receipt.pdf"
+    existing.write_text("dummy", encoding="utf-8")
+    missing = tmp_path / "missing.pdf"
+    meta = {"filename": str(tmp_path / "ledger.beancount"), "lineno": 1}
+
+    present_entry = data.Document(
+        meta=meta,
+        date=datetime.date(2026, 1, 20),
+        account="Assets:Checking",
+        filename=str(existing),
+        tags=frozenset(),
+        links=frozenset(),
+    )
+    missing_entry = data.Document(
+        meta=meta,
+        date=datetime.date(2026, 1, 20),
+        account="Assets:Checking",
+        filename=str(missing),
+        tags=frozenset(),
+        links=frozenset(),
+    )
+
+    date, keyword, payee, summary, amount = _entry_row(present_entry)
+    assert date == "2026-01-20"
+    assert keyword == "document"
+    assert payee == ""
+    assert amount == ""
+    assert summary == f"Assets:Checking: {existing}"
+
+    _, _, _, missing_summary, _ = _entry_row(missing_entry)
+    assert missing_summary == f"! Assets:Checking: {missing}"
+
+
+async def test_add_document_directive(ledger_path):
+    receipt = ledger_path.parent / "receipt.pdf"
+    receipt.write_text("dummy", encoding="utf-8")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "document")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'document Assets:FIXME "path/to/file.pdf"' in form.query_one("#text").text
+
+        form.query_one("#text").text = f'2026-09-06 document Assets:Checking "{receipt}"'
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    documents = [e for e in ledger.entries if isinstance(e, data.Document)]
+    assert any(d.account == "Assets:Checking" and d.filename == str(receipt) for d in documents)
+
+
+async def test_add_commodity_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "commodity")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "commodity HOOL" in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 commodity HOOL\n  name: "Alphabet Inc"'
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    commodities = [e for e in ledger.entries if isinstance(e, data.Commodity)]
+    assert any(
+        c.currency == "HOOL" and c.meta.get("name") == "Alphabet Inc" for c in commodities
+    )
+
+
+async def test_commodity_directive_displayed_in_table(ledger_path):
+    append_entry(ledger_path, "2026-09-06 commodity HOOL\n  name: \"Alphabet Inc\"")
+    append_entry(ledger_path, "2026-09-06 commodity USD")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        by_currency = {
+            e.currency: i for i, e in enumerate(table.shown) if isinstance(e, data.Commodity)
+        }
+
+        hool_row = table.get_row_at(by_currency["HOOL"])
+        assert tuple(hool_row) == ("2026-09-06", "commodity", "", "HOOL (Alphabet Inc)", "")
+
+        usd_row = table.get_row_at(by_currency["USD"])
+        assert tuple(usd_row) == ("2026-09-06", "commodity", "", "USD", "")
+
+
 async def test_delete_directive_with_confirmation(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
@@ -428,7 +972,7 @@ async def test_auto_reload_on_external_change(ledger_path):
         await pilot.pause()
         assert app.query_one(TransactionTable).row_count == 6
 
-        append_transaction(ledger_path, EXTERNAL_TXN)
+        append_entry(ledger_path, EXTERNAL_TXN)
         await pilot.pause(0.5)
 
         table = app.query_one(TransactionTable)
@@ -443,7 +987,7 @@ async def test_no_auto_reload_while_modal_open(ledger_path):
         await pilot.pause()
         assert isinstance(app.screen, TransactionForm)
 
-        append_transaction(ledger_path, EXTERNAL_TXN)
+        append_entry(ledger_path, EXTERNAL_TXN)
         await pilot.pause(0.5)
         # The open form blocks the reload...
         assert app.query_one(TransactionTable).row_count == 6
@@ -487,6 +1031,37 @@ async def test_income_statement_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, IncomeStatementScreen)
+
+
+async def test_ledger_info_screen(ledger_path):
+    from textual.widgets import Static
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("L")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, LedgerInfoScreen)
+
+        text = str(screen.query_one("#info", Static).render())
+
+        # From examples/example.beancount's `option` lines.
+        assert "Example Ledger" in text
+        assert "USD" in text
+        # Booking method and account-name roots always render, even though
+        # this ledger never overrides them (defaults only).
+        assert "STRICT" in text
+        assert "Assets" in text
+        assert "Expenses" in text
+        # The full source-file list, top-level file included.
+        assert str(app.ledger.path.resolve()) in text
+        for file in app.ledger.files:
+            assert str(file) in text
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, LedgerInfoScreen)
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

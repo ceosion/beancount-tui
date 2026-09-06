@@ -3,7 +3,7 @@ from beancount.core import data
 
 from beancount_tui.editor import (
     TransactionParseError,
-    append_transaction,
+    append_entry,
     delete_entry,
     entry_line_span,
     parse_directive_text,
@@ -72,8 +72,8 @@ def test_entry_line_span():
     assert entry_line_span(lines, 4) == 1
 
 
-def test_append_transaction(ledger_path):
-    append_transaction(ledger_path, NEW_TXN)
+def test_append_entry(ledger_path):
+    append_entry(ledger_path, NEW_TXN)
     ledger = Ledger.load(ledger_path)
     assert not ledger.errors
     assert len(ledger.transactions) == 7

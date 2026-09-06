@@ -63,6 +63,7 @@ uv run beancount-tui examples/example.beancount
 | Key      | Action                          |
 | -------- | ------------------------------- |
 | `n`      | New transaction                 |
+| `a`      | Add directive (open/close/balance/pad/note) |
 | `e`      | Edit selected transaction       |
 | `r`      | Reload ledger from disk         |
 | `q`      | Quit                            |
