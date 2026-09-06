@@ -6,6 +6,8 @@ from beancount_tui.ledger import (
     Ledger,
     filter_transactions,
     format_inventory,
+    parse_date_range,
+    resolve_date_preset,
     transaction_amount,
 )
 
@@ -112,6 +114,86 @@ def test_filter_transactions_by_date_range(ledger_path):
 def test_filter_transactions_invalid_range_falls_back_to_text(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert filter_transactions(ledger.transactions, "not..a-date") == []
+
+
+def test_resolve_date_preset_month(fixed_today):
+    assert resolve_date_preset("month", today=fixed_today) == (
+        datetime.date(2026, 3, 1),
+        fixed_today,
+    )
+
+
+def test_resolve_date_preset_last_month(fixed_today):
+    assert resolve_date_preset("last-month", today=fixed_today) == (
+        datetime.date(2026, 2, 1),
+        datetime.date(2026, 2, 28),
+    )
+
+
+def test_resolve_date_preset_last_month_across_year_boundary():
+    today = datetime.date(2026, 1, 15)
+    assert resolve_date_preset("last-month", today=today) == (
+        datetime.date(2025, 12, 1),
+        datetime.date(2025, 12, 31),
+    )
+
+
+def test_resolve_date_preset_year(fixed_today):
+    assert resolve_date_preset("year", today=fixed_today) == (
+        datetime.date(2026, 1, 1),
+        fixed_today,
+    )
+
+
+def test_resolve_date_preset_last_year(fixed_today):
+    assert resolve_date_preset("last-year", today=fixed_today) == (
+        datetime.date(2025, 1, 1),
+        datetime.date(2025, 12, 31),
+    )
+
+
+def test_resolve_date_preset_case_insensitive_and_trimmed(fixed_today):
+    assert resolve_date_preset("  MONTH  ", today=fixed_today) == (
+        datetime.date(2026, 3, 1),
+        fixed_today,
+    )
+
+
+def test_resolve_date_preset_unknown_token_returns_none(fixed_today):
+    assert resolve_date_preset("fortnight", today=fixed_today) is None
+
+
+def test_parse_date_range_recognizes_presets(fixed_today):
+    assert parse_date_range("year", today=fixed_today) == (
+        datetime.date(2026, 1, 1),
+        fixed_today,
+    )
+
+
+def test_parse_date_range_explicit_range_unaffected_by_today(fixed_today):
+    assert parse_date_range("2026-01-05..2026-01-10", today=fixed_today) == (
+        datetime.date(2026, 1, 5),
+        datetime.date(2026, 1, 10),
+    )
+
+
+def test_filter_transactions_with_month_preset(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    txns = ledger.transactions
+    # All example transactions fall in January 2026; treat "today" as being
+    # partway through that month so the "month" preset covers them all.
+    today = datetime.date(2026, 1, 20)
+    assert filter_transactions(txns, "month", today=today) == filter_transactions(
+        txns, "2026-01-01..2026-01-20"
+    )
+
+
+def test_filter_transactions_with_last_year_preset(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    txns = ledger.transactions
+    today = datetime.date(2027, 3, 1)
+    assert filter_transactions(txns, "last-year", today=today) == txns
+    assert filter_transactions(txns, "LAST-YEAR", today=today) == txns
 
 
 def test_income_statement_all_dates(ledger_path):
