@@ -27,7 +27,7 @@ functional tests miss.
 
 ### TOOL-02: Python version matrix in CI
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -36,9 +36,20 @@ against Python 3.11, 3.12, and 3.13 instead of only the runner default,
 per the project's stated `3.11+` support.
 
 **Acceptance criteria:**
-- [ ] CI matrix runs `pytest` and `ruff check` on 3.11, 3.12, and 3.13.
-- [ ] Any version-specific failures surfaced by the matrix are fixed or
+- [x] CI matrix runs `pytest` and `ruff check` on 3.11, 3.12, and 3.13.
+- [x] Any version-specific failures surfaced by the matrix are fixed or
       explicitly documented as known gaps.
+
+**Notes:** `.github/workflows/ci.yml`'s `test` job now runs a
+`strategy.matrix.python-version: ["3.11", "3.12", "3.13"]`, pinning each
+via `astral-sh/setup-uv@v5`'s `python-version` input (which sets
+`UV_PYTHON` for the rest of the job, overriding the interpreter `uv sync`/
+`uv run` would otherwise pick). `fail-fast: false` is set so a failure on
+one version doesn't hide results from the others. Verified locally with
+`uv run --python {3.11,3.12,3.13} pytest -q` and
+`uv run --python {3.11,3.12,3.13} ruff check .` — all 74 tests and lint
+pass cleanly on every version; no version-specific failures were found,
+so nothing needed to be fixed or documented as a known gap.
 
 ---
 
