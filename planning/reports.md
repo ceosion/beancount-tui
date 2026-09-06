@@ -74,7 +74,7 @@ expands to the equivalent `START..END` computed from today's date.
 
 ### RPT-04: Trial balance view
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -85,9 +85,9 @@ no section grouping beyond a flat sorted list), useful as a quick
 sanity-check view.
 
 **Acceptance criteria:**
-- [ ] New screen lists all accounts with nonzero balances at a selectable
+- [x] New screen lists all accounts with nonzero balances at a selectable
       date, sorted by account name.
-- [ ] Test covering output against a known example ledger state.
+- [x] Test covering output against a known example ledger state.
 
 ---
 

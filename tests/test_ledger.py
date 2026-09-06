@@ -29,6 +29,36 @@ def test_transactions_for_account_none_returns_all(ledger_path):
     assert ledger.transactions_for_account(None) == ledger.transactions
 
 
+def test_trial_balance_all_accounts(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    balances = {a: format_inventory(b) for a, b in ledger.trial_balance()}
+    assert balances == {
+        "Assets:Checking": "4,098.45 USD",
+        "Assets:Savings": "1,000.00 USD",
+        "Equity:Opening-Balances": "-2,500.00 USD",
+        "Expenses:Food:Groceries": "87.35 USD",
+        "Expenses:Food:Restaurant": "64.20 USD",
+        "Expenses:Rent": "1,450.00 USD",
+        "Income:Salary": "-4,200.00 USD",
+    }
+    # Sorted by account name.
+    assert [a for a, _ in ledger.trial_balance()] == sorted(balances)
+
+
+def test_trial_balance_as_of_excludes_later_postings(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    balances = {
+        a: format_inventory(b)
+        for a, b in ledger.trial_balance(as_of=datetime.date(2026, 1, 5))
+    }
+    # Only the opening balance and the salary deposit have posted by then.
+    assert balances == {
+        "Assets:Checking": "6,700.00 USD",
+        "Equity:Opening-Balances": "-2,500.00 USD",
+        "Income:Salary": "-4,200.00 USD",
+    }
+
+
 def test_transaction_amount(ledger_path):
     ledger = Ledger.load(ledger_path)
     rent = ledger.transactions_for_account("Expenses:Rent")[0]
