@@ -44,7 +44,7 @@ per the project's stated `3.11+` support.
 
 ### TOOL-03: Coverage reporting
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -53,9 +53,9 @@ and fail the build below a threshold once a baseline is established from
 the current suite.
 
 **Acceptance criteria:**
-- [ ] CI runs tests with coverage and reports the percentage (job summary or
+- [x] CI runs tests with coverage and reports the percentage (job summary or
       uploaded artifact).
-- [ ] A minimum-coverage threshold is enforced, set at or slightly below the
+- [x] A minimum-coverage threshold is enforced, set at or slightly below the
       baseline measured when this task lands.
 
 ---
