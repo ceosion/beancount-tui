@@ -1,8 +1,10 @@
 """Table of ledger entries for the selected account.
 
 Shows transactions and, when the app's directives toggle is on, the
-account-level directives (open, close, balance, pad, note, query, commodity)
-as well.
+account-level directives (open, close, balance, pad, note, price, event,
+custom, query, commodity, document) as well. Each directive keyword is
+colored distinctly (see ``_DIRECTIVE_STYLES``) so a mixed-directive table
+stays scannable.
 """
 
 from __future__ import annotations
@@ -12,9 +14,34 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from beancount.core import data
+from rich.text import Text
 from textual.widgets import DataTable
 
 from beancount_tui.ledger import has_user_metadata, transaction_amount, transaction_amount_value
+
+# One color per non-Transaction directive keyword, so a mixed-directive table
+# (with the ``t`` toggle on) stays scannable instead of reading as a wall of
+# similarly-styled rows. Kept loosely grouped by theme (account lifecycle,
+# reconciliation, pricing, annotation) but each keyword still gets its own
+# distinct hue.
+_DIRECTIVE_STYLES: dict[str, str] = {
+    "open": "green",
+    "close": "red",
+    "balance": "yellow",
+    "pad": "dark_orange",
+    "note": "bright_black",
+    "price": "magenta",
+    "commodity": "purple",
+    "event": "blue",
+    "document": "cyan",
+    "custom": "bright_magenta",
+    "query": "bright_blue",
+}
+
+
+def _keyword(label: str) -> Text:
+    """Style ``label`` (a directive keyword) per ``_DIRECTIVE_STYLES``."""
+    return Text(label, style=_DIRECTIVE_STYLES.get(label, ""))
 
 SortField = Literal["date", "payee", "amount"]
 
@@ -120,11 +147,12 @@ class TransactionTable(DataTable):
         return None
 
 
-def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
+def _entry_row(entry: data.Directive) -> tuple[str, str | Text, str, str, str]:
     """The (date, flag, payee, narration, amount) cells for an entry.
 
-    Non-transaction directives show their keyword in the flag column and a
-    summary in the narration column.
+    Non-transaction directives show their keyword in the flag column,
+    colored per ``_DIRECTIVE_STYLES`` so a mixed-directive table stays
+    scannable, and a summary in the narration column.
     """
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
@@ -137,33 +165,33 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         return (date, entry.flag or "*", entry.payee or "", narration,
                 transaction_amount(entry))
     if isinstance(entry, data.Open):
-        return (date, "open", "", entry.account, ", ".join(entry.currencies or []))
+        return (date, _keyword("open"), "", entry.account, ", ".join(entry.currencies or []))
     if isinstance(entry, data.Close):
-        return (date, "close", "", entry.account, "")
+        return (date, _keyword("close"), "", entry.account, "")
     if isinstance(entry, data.Balance):
-        return (date, "balance", "", entry.account,
+        return (date, _keyword("balance"), "", entry.account,
                 f"{entry.amount.number} {entry.amount.currency}")
     if isinstance(entry, data.Pad):
-        return (date, "pad", "", f"{entry.account} from {entry.source_account}", "")
+        return (date, _keyword("pad"), "", f"{entry.account} from {entry.source_account}", "")
     if isinstance(entry, data.Note):
-        return (date, "note", "", f"{entry.account}: {entry.comment}", "")
+        return (date, _keyword("note"), "", f"{entry.account}: {entry.comment}", "")
     if isinstance(entry, data.Price):
-        return (date, "price", "", entry.currency,
+        return (date, _keyword("price"), "", entry.currency,
                 f"{entry.amount.number} {entry.amount.currency}")
     if isinstance(entry, data.Event):
-        return (date, "event", "", f'"{entry.type}": "{entry.description}"', "")
+        return (date, _keyword("event"), "", f'"{entry.type}": "{entry.description}"', "")
     if isinstance(entry, data.Custom):
         values = ", ".join(str(v.value) for v in entry.values)
-        return (date, "custom", "", f"{entry.type}: {values}", "")
+        return (date, _keyword("custom"), "", f"{entry.type}: {values}", "")
     if isinstance(entry, data.Query):
         query_text = entry.query_string
         if len(query_text) > 40:
             query_text = f"{query_text[:40]}..."
-        return (date, "query", "", f"{entry.name}: {query_text}", "")
+        return (date, _keyword("query"), "", f"{entry.name}: {query_text}", "")
     if isinstance(entry, data.Commodity):
         name = entry.meta.get("name") if entry.meta else None
         summary = f"{entry.currency} ({name})" if name else entry.currency
-        return (date, "commodity", "", summary, "")
+        return (date, _keyword("commodity"), "", summary, "")
     if isinstance(entry, data.Document):
         summary = f"{entry.account}: {entry.filename}"
         # Beancount resolves ``filename`` to an absolute path (relative to the
@@ -171,8 +199,8 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         # reaches us, so a plain existence check is all that's needed here.
         if not Path(entry.filename).exists():
             summary = f"! {summary}"
-        return (date, "document", "", summary, "")
-    return (date, type(entry).__name__.lower(), "", "", "")
+        return (date, _keyword("document"), "", summary, "")
+    return (date, _keyword(type(entry).__name__.lower()), "", "", "")
 
 
 def _tags_links_summary(entry: data.Transaction) -> str:
