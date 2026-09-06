@@ -22,6 +22,7 @@ from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.query_runner import QueryRunnerScreen
 from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
@@ -1781,3 +1782,87 @@ async def test_import_review_edit_before_import(ledger_path):
     accounts = {p.account for p in edited_txn.postings}
     assert "Expenses:Food:Restaurant" in accounts
     assert "Expenses:FIXME" not in accounts
+
+
+async def test_query_runner_screen_runs_typed_query(ledger_path):
+    from textual.widgets import DataTable, Input, Static
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELECT account, sum(position) AS total GROUP BY account"
+        await pilot.pause()
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        table = screen.query_one("#results", DataTable)
+        assert len(table.columns) == 2
+        rows = {
+            table.get_row_at(i)[0]: table.get_row_at(i)[1] for i in range(table.row_count)
+        }
+        assert rows["Assets:Checking"] == "4,098.45 USD"
+
+        error = screen.query_one("#error", Static)
+        assert str(error.render()) == ""
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, QueryRunnerScreen)
+
+
+async def test_query_runner_screen_shows_inline_error_for_bad_query(ledger_path):
+    from textual.widgets import Input, Static
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELEKT accountz"
+        await pilot.pause()
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        error = screen.query_one("#error", Static)
+        assert str(error.render()) != ""
+        # The app is still alive and the modal is still open, i.e. no crash.
+        assert isinstance(app.screen, QueryRunnerScreen)
+
+
+async def test_query_runner_screen_saved_query_picker(ledger_path):
+    from textual.widgets import DataTable, Select
+
+    append_entry(
+        ledger_path,
+        '2026-01-01 query "cash" '
+        '"SELECT account, sum(position) AS total GROUP BY account"\n',
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        select = screen.query_one("#saved-query", Select)
+        select.value = "SELECT account, sum(position) AS total GROUP BY account"
+        await pilot.pause()
+
+        table = screen.query_one("#results", DataTable)
+        rows = {
+            table.get_row_at(i)[0]: table.get_row_at(i)[1] for i in range(table.row_count)
+        }
+        assert rows["Assets:Checking"] == "4,098.45 USD"

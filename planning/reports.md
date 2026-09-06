@@ -118,20 +118,26 @@ cost-basis postings being handled correctly elsewhere (`LANG-10`).
 
 ### RPT-06: Ad hoc BQL query runner
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
 **Description:** A screen with a text input for a BQL query, run against the
-loaded ledger via `beancount.query.query.run_query` (same engine as
-`bean-query`), rendering the result as a table. If `LANG-07` (Query
-directives) has landed, also let the user pick a saved named query from the
-ledger to run instead of typing one.
+loaded ledger via the Beancount query engine (same engine as `bean-query`),
+rendering the result as a table. Note: on `beancount>=3.0.0`, the query
+engine no longer lives at `beancount.query.query` — that module was split
+out into the separate `beanquery` package (added as a dependency here);
+`Ledger.run_query` in `ledger.py` wraps it (`beanquery.connect("beancount:",
+entries=..., errors=..., options=...)` then `connection.execute(...)`). If
+`LANG-07` (Query directives) has landed, also let the user pick a saved
+named query from the ledger to run instead of typing one — it has, so this
+is implemented: `data.Query` entries are listed in a `Select`.
 
 **Acceptance criteria:**
-- [ ] User can type a BQL query and see a result table.
-- [ ] Query errors (bad syntax, unknown column) are shown inline rather than
+- [x] User can type a BQL query and see a result table.
+- [x] Query errors (bad syntax, unknown column) are shown inline rather than
       crashing the app.
-- [ ] Test covering a simple known query against the example ledger.
-- [ ] If `LANG-07` is done: named queries from the ledger are selectable and
-      run the same way.
+- [x] Test covering a simple known query against the example ledger.
+- [x] If `LANG-07` is done: named queries from the ledger are selectable and
+      run the same way. (LANG-07 is done; implemented via a `Select` of
+      `data.Query` directives in `QueryRunnerScreen`.)

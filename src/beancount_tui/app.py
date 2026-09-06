@@ -28,6 +28,7 @@ from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.query_runner import QueryRunnerScreen
 from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
@@ -157,6 +158,7 @@ class BeancountTUI(App):
         ("s", "balance_sheet", "Balance sheet"),
         ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
+        ("Q", "query_runner", "Query"),
         ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
@@ -246,6 +248,9 @@ class BeancountTUI(App):
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))
+
+    def action_query_runner(self) -> None:
+        self.push_screen(QueryRunnerScreen(self.ledger))
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen(self.BINDINGS))

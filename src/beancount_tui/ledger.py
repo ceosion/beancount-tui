@@ -7,8 +7,9 @@ from dataclasses import dataclass, field
 from decimal import Decimal
 from pathlib import Path
 
+import beanquery
 from beancount import loader
-from beancount.core import data, getters, prices, realization
+from beancount.core import data, getters, position, prices, realization
 from beancount.core.inventory import Inventory
 
 
@@ -124,6 +125,22 @@ class HoldingsReport:
 
 
 @dataclass
+class QueryResult:
+    """The result of running a BQL query: column names plus row tuples.
+
+    Mirrors what ``beanquery`` (the Beancount 3.x successor to the
+    `beancount.query` package that shipped in 2.x) hands back from a
+    ``Cursor``: ``columns`` is the ``description``'s column names, in
+    order, and ``rows`` are the raw fetched row tuples (mixed scalar
+    types — ``str``, ``Decimal``, ``datetime.date``, ``Inventory``,
+    ``Position``, etc.) — see ``format_query_value`` for rendering them.
+    """
+
+    columns: list[str]
+    rows: list[tuple]
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -175,6 +192,34 @@ class Ledger:
                 for a in getters.get_entry_accounts(entry)
             )
         ]
+
+    @property
+    def queries(self) -> list[data.Query]:
+        """Saved named BQL queries (``data.Query`` directives) in the ledger."""
+        return [e for e in self.entries if isinstance(e, data.Query)]
+
+    def run_query(self, query_string: str) -> QueryResult:
+        """Run a BQL query against this ledger via ``beanquery``.
+
+        ``beanquery`` is the package that provides the query engine in
+        Beancount 3.x (the ``beancount.query`` module from 2.x was split
+        out into it). Connects to the in-memory ``entries``/``options``
+        directly (the ``beancount:`` DSN with no path, plus ``entries=``/
+        ``options=`` kwargs) rather than having it re-load the ledger file
+        itself, since it's already loaded here.
+
+        Raises ``beanquery.Error`` (``ParseError`` for bad syntax,
+        ``CompilationError`` for e.g. an unknown column) on an invalid
+        query — callers should catch it and show a message rather than
+        letting it propagate.
+        """
+        connection = beanquery.connect(
+            "beancount:", entries=self.entries, errors=self.errors, options=self.options
+        )
+        cursor = connection.execute(query_string)
+        columns = [column.name for column in cursor.description]
+        rows = cursor.fetchall()
+        return QueryResult(columns=columns, rows=rows)
 
     @property
     def files(self) -> list[Path]:
@@ -644,6 +689,33 @@ def format_inventory(inventory: Inventory) -> str:
     """Render an inventory as ``1,234.56 USD, 20 EUR`` (empty string if empty)."""
     positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
     return ", ".join(f"{pos.units.number:,} {pos.units.currency}" for pos in positions)
+
+
+def format_query_value(value: object) -> str:
+    """Render one BQL result cell for display in a table.
+
+    Most cells are already simple scalars (``str``, ``datetime.date``);
+    ``str()`` suffices for those, and for ``None`` (a SQL NULL) it's an
+    empty cell rather than the Python string ``"None"``. The Beancount
+    value types beanquery hands back for things like ``sum(position)`` or
+    a bare ``position``/``amount`` column render with their own
+    ``__str__`` too, but not in this codebase's ``1,234.56 USD`` style
+    (e.g. an ``Inventory``'s is ``(1234.56 USD)``, no thousands
+    separator) — so those, plus bare ``Decimal`` cells, get the same
+    comma-grouped formatting as :func:`format_inventory` for consistency
+    with the rest of the UI.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, Inventory):
+        return format_inventory(value)
+    if isinstance(value, position.Position):
+        return f"{value.units.number:,} {value.units.currency}"
+    if isinstance(value, data.Amount):
+        return f"{value.number:,} {value.currency}"
+    if isinstance(value, Decimal):
+        return f"{value:,}"
+    return str(value)
 
 
 def transaction_amount(txn: data.Transaction) -> str:
