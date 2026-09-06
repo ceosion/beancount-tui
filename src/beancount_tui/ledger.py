@@ -142,6 +142,29 @@ class Ledger:
         net.add_inventory(-expenses_total)
         return IncomeStatement(income, expenses, income_total, expenses_total, net)
 
+    def trial_balance(self, as_of: datetime.date | None = None) -> list[tuple[str, Inventory]]:
+        """Nonzero balances for every account, as of ``as_of`` (default: today).
+
+        Sums every posting dated on or before ``as_of`` per account, across
+        all five account types, and drops accounts whose net balance is
+        zero. Sorted by account name.
+        """
+        if as_of is None:
+            as_of = datetime.date.today()
+        per_account: dict[str, Inventory] = {}
+        for txn in self.transactions:
+            if txn.date > as_of:
+                continue
+            for posting in txn.postings:
+                if posting.units is None or posting.units.number is None:
+                    continue
+                per_account.setdefault(posting.account, Inventory()).add_amount(posting.units)
+        return [
+            (account, balance)
+            for account, balance in sorted(per_account.items())
+            if not balance.is_empty()
+        ]
+
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""
         mtimes = {}
@@ -169,21 +192,26 @@ class Ledger:
 
 
 def filter_transactions(
-    transactions: list[data.Directive], query: str
+    transactions: list[data.Directive],
+    query: str,
+    today: datetime.date | None = None,
 ) -> list[data.Directive]:
     """Filter entries by text or by date range.
 
     A query of the form ``START..END`` — ISO dates, either side optional
     (``2026-01-01..2026-01-31``, ``2026-01-15..``, ``..2026-01-10``) —
-    selects a date range, inclusive on both ends. Any other query is a
-    case-insensitive substring match: against payee and narration for
-    transactions, and against the directive keyword, accounts, and note
+    selects a date range, inclusive on both ends. A query matching one of the
+    quick preset tokens (``month``, ``last-month``, ``year``, ``last-year``;
+    see :func:`resolve_date_preset`) selects the equivalent date range
+    computed from ``today`` (defaults to the real current date). Any other
+    query is a case-insensitive substring match: against payee and narration
+    for transactions, and against the directive keyword, accounts, and note
     comment for other directives.
     """
     query = query.strip()
     if not query:
         return transactions
-    date_range = parse_date_range(query)
+    date_range = parse_date_range(query, today=today)
     if date_range is not None:
         start, end = date_range
         return [
@@ -236,10 +264,51 @@ def _entry_search_text(entry: data.Directive) -> str:
     return " ".join(parts)
 
 
+def resolve_date_preset(
+    token: str, today: datetime.date | None = None
+) -> tuple[datetime.date, datetime.date] | None:
+    """Expand a quick preset token into a ``(start, end)`` date range.
+
+    ``today`` defaults to the real current date; tests pass a fixed date to
+    make the resolution deterministic. Recognized tokens (case-insensitive,
+    surrounding whitespace ignored):
+
+    - ``month``: from the 1st of the current month through ``today``.
+    - ``last-month``: the entirety of the previous calendar month.
+    - ``year``: from January 1st of the current year through ``today``.
+    - ``last-year``: the entirety of the previous calendar year.
+
+    Returns ``None`` if ``token`` isn't one of the above.
+    """
+    if today is None:
+        today = datetime.date.today()
+    token = token.strip().lower()
+    if token == "month":
+        return today.replace(day=1), today
+    if token == "last-month":
+        first_of_this_month = today.replace(day=1)
+        last_of_last_month = first_of_this_month - datetime.timedelta(days=1)
+        return last_of_last_month.replace(day=1), last_of_last_month
+    if token == "year":
+        return today.replace(month=1, day=1), today
+    if token == "last-year":
+        return datetime.date(today.year - 1, 1, 1), datetime.date(today.year - 1, 12, 31)
+    return None
+
+
 def parse_date_range(
     query: str,
+    today: datetime.date | None = None,
 ) -> tuple[datetime.date | None, datetime.date | None] | None:
-    """Parse ``START..END`` into dates, or ``None`` if it isn't a date range."""
+    """Parse ``START..END`` or a quick preset token into dates.
+
+    Returns ``None`` if ``query`` is neither. Preset tokens (``month``,
+    ``last-month``, ``year``, ``last-year``) are tried first via
+    :func:`resolve_date_preset`, using ``today`` if given.
+    """
+    preset = resolve_date_preset(query, today=today)
+    if preset is not None:
+        return preset
     if ".." not in query:
         return None
     start_text, _, end_text = query.partition("..")

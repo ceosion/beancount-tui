@@ -1,9 +1,16 @@
+import datetime
 import shutil
 from pathlib import Path
 
 import pytest
 
 EXAMPLE = Path(__file__).parent.parent / "examples" / "example.beancount"
+
+
+@pytest.fixture
+def fixed_today() -> datetime.date:
+    """A fixed "today" for deterministic date-preset tests."""
+    return datetime.date(2026, 3, 15)
 
 
 @pytest.fixture

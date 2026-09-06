@@ -13,16 +13,20 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
 from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
+from beancount_tui.importer import ImportCandidate
 from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.help_screen import HelpScreen
+from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
+from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
 # Minimal valid source text for each creatable non-transaction directive type,
 # ready for the user to fill in the placeholder account(s)/amount.
@@ -84,10 +88,13 @@ class BeancountTUI(App):
         ("t", "toggle_directives", "Directives"),
         ("u", "undo", "Undo"),
         ("i", "income_statement", "Income stmt"),
+        ("b", "trial_balance", "Trial balance"),
         ("L", "ledger_info", "Ledger info"),
+        ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
+        ("question_mark", "help", "Help"),
     ]
 
     def __init__(self, ledger_path: str | Path, watch_interval: float = 1.0) -> None:
@@ -155,8 +162,27 @@ class BeancountTUI(App):
     def action_income_statement(self) -> None:
         self.push_screen(IncomeStatementScreen(self.ledger))
 
+    def action_trial_balance(self) -> None:
+        self.push_screen(TrialBalanceScreen(self.ledger))
+
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))
+
+    def action_help(self) -> None:
+        self.push_screen(HelpScreen(self.BINDINGS))
+
+    def action_import_csv(self) -> None:
+        def on_result(candidates: list[ImportCandidate] | None) -> None:
+            if candidates is None:
+                return
+            errors = sum(1 for c in candidates if c.error)
+            summary = f"Parsed {len(candidates)} row(s)"
+            if errors:
+                summary += f", {errors} with errors"
+            summary += "."
+            self.notify(summary)
+
+        self.push_screen(ImportForm(), on_result)
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)

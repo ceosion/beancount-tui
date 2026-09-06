@@ -29,7 +29,9 @@ class FilterBar(Input):
 
     def __init__(self, **kwargs) -> None:
         super().__init__(
-            placeholder="payee/narration text, or date range YYYY-MM-DD..YYYY-MM-DD",
+            placeholder=(
+                "text, YYYY-MM-DD..YYYY-MM-DD, or month/last-month/year/last-year"
+            ),
             **kwargs,
         )
 

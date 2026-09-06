@@ -54,7 +54,7 @@ units per currency.
 
 ### RPT-03: Date-range presets for the filter
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -64,17 +64,17 @@ typing `month`, `last-month`, `year`, `last-year` (or dedicated keybindings)
 expands to the equivalent `START..END` computed from today's date.
 
 **Acceptance criteria:**
-- [ ] At least `month`, `last-month`, `year`, `last-year` tokens are
+- [x] At least `month`, `last-month`, `year`, `last-year` tokens are
       recognized by the filter bar and produce the correct date range.
-- [ ] Existing explicit `START..END` and text-search behavior is unchanged.
-- [ ] Tests covering each preset token resolves to the expected range for a
+- [x] Existing explicit `START..END` and text-search behavior is unchanged.
+- [x] Tests covering each preset token resolves to the expected range for a
       fixed "today".
 
 ---
 
 ### RPT-04: Trial balance view
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -85,9 +85,9 @@ no section grouping beyond a flat sorted list), useful as a quick
 sanity-check view.
 
 **Acceptance criteria:**
-- [ ] New screen lists all accounts with nonzero balances at a selectable
+- [x] New screen lists all accounts with nonzero balances at a selectable
       date, sorted by account name.
-- [ ] Test covering output against a known example ledger state.
+- [x] Test covering output against a known example ledger state.
 
 ---
 
