@@ -15,6 +15,7 @@ from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
+from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 
@@ -984,6 +985,37 @@ async def test_income_statement_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, IncomeStatementScreen)
+
+
+async def test_ledger_info_screen(ledger_path):
+    from textual.widgets import Static
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("L")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, LedgerInfoScreen)
+
+        text = str(screen.query_one("#info", Static).render())
+
+        # From examples/example.beancount's `option` lines.
+        assert "Example Ledger" in text
+        assert "USD" in text
+        # Booking method and account-name roots always render, even though
+        # this ledger never overrides them (defaults only).
+        assert "STRICT" in text
+        assert "Assets" in text
+        assert "Expenses" in text
+        # The full source-file list, top-level file included.
+        assert str(app.ledger.path.resolve()) in text
+        for file in app.ledger.files:
+            assert str(file) in text
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, LedgerInfoScreen)
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

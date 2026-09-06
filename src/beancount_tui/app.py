@@ -20,6 +20,7 @@ from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormRes
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
+from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
 
@@ -82,6 +83,7 @@ class BeancountTUI(App):
         ("t", "toggle_directives", "Directives"),
         ("u", "undo", "Undo"),
         ("i", "income_statement", "Income stmt"),
+        ("L", "ledger_info", "Ledger info"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
@@ -151,6 +153,9 @@ class BeancountTUI(App):
 
     def action_income_statement(self) -> None:
         self.push_screen(IncomeStatementScreen(self.ledger))
+
+    def action_ledger_info(self) -> None:
+        self.push_screen(LedgerInfoScreen(self.ledger))
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)
