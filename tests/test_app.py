@@ -16,7 +16,7 @@ from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
-from beancount_tui.widgets.transaction_table import TransactionTable
+from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 
 
 async def _pick_directive_type(pilot, keyword: str) -> None:
@@ -367,7 +367,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         assert isinstance(picker, DirectiveTypePicker)
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
-        assert ids == {"open", "close", "balance", "pad", "note", "price", "event"}
+        assert ids == {"open", "close", "balance", "pad", "note", "price", "event", "custom"}
 
         await pilot.press("escape")
         await pilot.pause()
@@ -558,6 +558,47 @@ async def test_add_event_directive(ledger_path):
     assert not ledger.errors
     events = [e for e in ledger.entries if isinstance(e, data.Event)]
     assert any(e.type == "location" and e.description == "Paris" for e in events)
+
+
+async def test_add_custom_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "custom")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'custom "budget" "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 custom "budget" "Groceries" 500.00 USD'
+        )
+        form._save()
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        row = next(e for e in table.shown if isinstance(e, data.Custom))
+        assert _entry_row(row) == (
+            "2026-09-06",
+            "custom",
+            "",
+            'budget: Groceries, 500.00 USD',
+            "",
+        )
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    customs = [e for e in ledger.entries if isinstance(e, data.Custom)]
+    assert any(
+        c.type == "budget"
+        and c.values[0].value == "Groceries"
+        and str(c.values[1].value) == "500.00 USD"
+        for c in customs
+    )
 
 
 async def test_add_directive_into_included_file(multi_ledger_path):

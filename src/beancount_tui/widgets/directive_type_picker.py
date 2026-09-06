@@ -17,6 +17,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("pad", "Pad — auto-balance from another account"),
     ("price", "Price — record a price quote"),
     ("event", "Event — record a dated event value"),
+    ("custom", "Custom — a user-defined directive"),
 )
 
 

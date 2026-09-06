@@ -65,4 +65,7 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
                 f"{entry.amount.number} {entry.amount.currency}")
     if isinstance(entry, data.Event):
         return (date, "event", "", f'"{entry.type}": "{entry.description}"', "")
+    if isinstance(entry, data.Custom):
+        values = ", ".join(str(v.value) for v in entry.values)
+        return (date, "custom", "", f"{entry.type}: {values}", "")
     return (date, type(entry).__name__.lower(), "", "", "")
