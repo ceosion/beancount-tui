@@ -4,11 +4,12 @@ import datetime
 from pathlib import Path
 
 from beancount.core import data
+from rich.text import Text
 from textual.widgets import Checkbox, DataTable, OptionList, Select
 
 from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry
-from beancount_tui.ledger import Ledger
+from beancount_tui.ledger import Ledger, transaction_amount_value
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
@@ -1781,3 +1782,160 @@ async def test_import_review_edit_before_import(ledger_path):
     accounts = {p.account for p in edited_txn.postings}
     assert "Expenses:Food:Restaurant" in accounts
     assert "Expenses:FIXME" not in accounts
+
+
+def _header_selected(table: TransactionTable, column_index: int) -> DataTable.HeaderSelected:
+    """Build a real ``HeaderSelected`` message for ``column_index``, as a header click would."""
+    column_key = list(table.columns.keys())[column_index]
+    return DataTable.HeaderSelected(table, column_key, column_index, Text("header"))
+
+
+async def test_sort_by_date_toggles_on_repeated_header_click(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        dates = [str(e.date) for e in table.shown]
+        assert dates == sorted(dates)
+
+        table.on_data_table_header_selected(_header_selected(table, 0))
+        await pilot.pause()
+        assert [str(e.date) for e in table.shown] == sorted(dates)
+
+        # Clicking the same header again reverses the direction.
+        table.on_data_table_header_selected(_header_selected(table, 0))
+        await pilot.pause()
+        assert [str(e.date) for e in table.shown] == sorted(dates, reverse=True)
+
+
+async def test_sort_by_payee_toggles_on_repeated_header_click(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+
+        table.on_data_table_header_selected(_header_selected(table, 2))
+        await pilot.pause()
+        payees = [e.payee or "" for e in table.shown]
+        assert payees == sorted(payees, key=str.lower)
+
+        table.on_data_table_header_selected(_header_selected(table, 2))
+        await pilot.pause()
+        payees = [e.payee or "" for e in table.shown]
+        assert payees == sorted(payees, key=str.lower, reverse=True)
+
+
+async def test_sort_by_amount_toggles_on_repeated_header_click(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+
+        table.on_data_table_header_selected(_header_selected(table, 4))
+        await pilot.pause()
+        amounts = [transaction_amount_value(e) for e in table.shown]
+        assert amounts == sorted(amounts)
+
+        table.on_data_table_header_selected(_header_selected(table, 4))
+        await pilot.pause()
+        amounts = [transaction_amount_value(e) for e in table.shown]
+        assert amounts == sorted(amounts, reverse=True)
+
+
+async def test_sort_persists_across_filter_and_account_changes(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+
+        # Sort by amount descending.
+        table.on_data_table_header_selected(_header_selected(table, 4))
+        table.on_data_table_header_selected(_header_selected(table, 4))
+        await pilot.pause()
+        amounts = [transaction_amount_value(e) for e in table.shown]
+        assert amounts == sorted(amounts, reverse=True)
+        assert table._sort_field == "amount" and table._sort_reverse is True
+
+        # A filter change re-renders the table; the sort should still apply.
+        await pilot.press("/")
+        await pilot.press(*"e")
+        await pilot.pause()
+        amounts = [transaction_amount_value(e) for e in table.shown]
+        assert amounts == sorted(amounts, reverse=True)
+        assert table._sort_field == "amount" and table._sort_reverse is True
+
+        await pilot.press("escape")
+        await pilot.pause()
+
+        # Selecting an account also re-renders; the sort persists.
+        app.selected_account = "Expenses:Food"
+        table.update_entries(app._visible_entries())
+        await pilot.pause()
+        amounts = [transaction_amount_value(e) for e in table.shown]
+        assert amounts == sorted(amounts, reverse=True)
+        assert table._sort_field == "amount" and table._sort_reverse is True
+
+
+async def test_sort_key_cycles_field_and_direction(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.focus()
+        await pilot.pause()
+
+        dates = [str(e.date) for e in table.shown]
+        payees = [e.payee or "" for e in table.shown]
+
+        await pilot.press("o")  # date ascending
+        await pilot.pause()
+        assert table._sort_field == "date" and table._sort_reverse is False
+        assert [str(e.date) for e in table.shown] == sorted(dates)
+
+        await pilot.press("o")  # date descending
+        await pilot.pause()
+        assert table._sort_field == "date" and table._sort_reverse is True
+        assert [str(e.date) for e in table.shown] == sorted(dates, reverse=True)
+
+        await pilot.press("o")  # payee ascending
+        await pilot.pause()
+        assert table._sort_field == "payee" and table._sort_reverse is False
+        assert [e.payee or "" for e in table.shown] == sorted(payees, key=str.lower)
+
+        await pilot.press("o")  # payee descending
+        await pilot.pause()
+        assert table._sort_field == "payee" and table._sort_reverse is True
+        assert [e.payee or "" for e in table.shown] == sorted(payees, key=str.lower, reverse=True)
+
+        await pilot.press("o")  # amount ascending
+        await pilot.pause()
+        assert table._sort_field == "amount" and table._sort_reverse is False
+
+        await pilot.press("o")  # amount descending
+        await pilot.pause()
+        assert table._sort_field == "amount" and table._sort_reverse is True
+
+        await pilot.press("o")  # wraps back to date ascending
+        await pilot.pause()
+        assert table._sort_field == "date" and table._sort_reverse is False
+
+
+async def test_sort_handles_non_transaction_directives_without_crashing(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")  # show directives too (balance/note/etc. have no payee/amount)
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count > 6
+
+        # Sorting by payee and amount should not crash even though some
+        # directives have neither; missing payee sorts as "" and missing
+        # amount sorts as 0.
+        table.on_data_table_header_selected(_header_selected(table, 2))
+        await pilot.pause()
+        assert table.row_count > 6
+
+        table.on_data_table_header_selected(_header_selected(table, 4))
+        await pilot.pause()
+        assert table.row_count > 6

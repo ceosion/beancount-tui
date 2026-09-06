@@ -25,7 +25,7 @@ bindings keep landing across the `LANG`/`RPT`/`EDIT` tasks.
 
 ### UX-02: Sortable columns
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -35,11 +35,11 @@ date, payee, or amount — via clicking a column header (Textual's
 toggling ascending/descending on repeat.
 
 **Acceptance criteria:**
-- [ ] Table can be sorted by date, payee, and amount, each toggling
+- [x] Table can be sorted by date, payee, and amount, each toggling
       ascending/descending on repeated selection.
-- [ ] Sort persists across filter changes and account selection until
+- [x] Sort persists across filter changes and account selection until
       explicitly changed.
-- [ ] Test covering sort order for each field.
+- [x] Test covering sort order for each field.
 
 ---
 
