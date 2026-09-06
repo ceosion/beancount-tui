@@ -28,7 +28,7 @@ redo alongside the existing `u` for undo.
 
 ### EDIT-02: Balance-assertion helper
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -40,13 +40,13 @@ dated today. This is the fastest way to checkpoint an account right after
 reconciling it against a statement.
 
 **Acceptance criteria:**
-- [ ] Binding available when an account is selected in the sidebar.
-- [ ] Pre-filled directive shows the account's current computed balance for
+- [x] Binding available when an account is selected in the sidebar.
+- [x] Pre-filled directive shows the account's current computed balance for
       each currency it holds (one directive per currency if it holds more
       than one).
-- [ ] Saving appends and the ledger still validates (no self-inflicted
+- [x] Saving appends and the ledger still validates (no self-inflicted
       assertion failure from a stale computed value).
-- [ ] Test covering the pre-filled amount matches the account's realized
+- [x] Test covering the pre-filled amount matches the account's realized
       balance.
 
 ---

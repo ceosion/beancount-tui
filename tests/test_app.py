@@ -566,6 +566,104 @@ async def test_add_balance_directive(ledger_path):
     )
 
 
+async def test_balance_directive_helper_requires_selected_account(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.selected_account is None
+        await pilot.press("B")
+        await pilot.pause()
+        assert not isinstance(app.screen, DirectiveForm)
+
+
+async def test_balance_directive_helper_skips_type_picker(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Assets:Checking"
+        await pilot.press("B")
+        await pilot.pause()
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        today = datetime.date.today().isoformat()
+        # Pre-filled with today's date and Assets:Checking's actual realized
+        # balance (same figure asserted in test_add_balance_directive above),
+        # not a stale/placeholder value.
+        assert form.query_one("#text").text == (
+            f"{today} balance Assets:Checking  4098.45 USD"
+        )
+
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    balances = [e for e in ledger.entries if isinstance(e, data.Balance)]
+    assert any(
+        b.account == "Assets:Checking" and str(b.amount.number) == "4098.45"
+        for b in balances
+    )
+
+
+async def test_balance_directive_helper_multi_currency(ledger_path):
+    # A wallet account (no currency restriction on its `open`) holding two
+    # currencies: the helper should produce one balance directive per
+    # currency, in sequence.
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Wallet\n"
+        "2026-01-01 open Equity:Wallet-Seed\n",
+    )
+    append_entry(
+        ledger_path,
+        '2026-01-20 * "Wallet seed" "Euros"\n'
+        "  Assets:Wallet  50.00 EUR\n"
+        "  Equity:Wallet-Seed\n"
+        "\n"
+        '2026-01-20 * "Wallet seed" "Dollars"\n'
+        "  Assets:Wallet  -50.00 USD\n"
+        "  Equity:Wallet-Seed\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Assets:Wallet"
+        await pilot.press("B")
+        await pilot.pause()
+
+        today = datetime.date.today().isoformat()
+        first_form = app.screen
+        assert isinstance(first_form, DirectiveForm)
+        assert first_form.query_one("#text").text == (
+            f"{today} balance Assets:Wallet  50.00 EUR"
+        )
+        first_form._save()
+        await pilot.pause()
+
+        # One directive per currency: a second form for the other currency
+        # opens automatically after the first is saved.
+        second_form = app.screen
+        assert isinstance(second_form, DirectiveForm)
+        assert second_form.query_one("#text").text == (
+            f"{today} balance Assets:Wallet  -50.00 USD"
+        )
+        second_form._save()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, DirectiveForm)
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    balances = [
+        e
+        for e in ledger.entries
+        if isinstance(e, data.Balance) and e.account == "Assets:Wallet"
+    ]
+    assert any(str(b.amount.number) == "50.00" and b.amount.currency == "EUR" for b in balances)
+    assert any(str(b.amount.number) == "-50.00" and b.amount.currency == "USD" for b in balances)
+
+
 async def test_add_pad_directive(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
