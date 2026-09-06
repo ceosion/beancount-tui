@@ -188,7 +188,7 @@ make `filter_transactions` match against them.
 
 ### LANG-09: Metadata surfacing
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -201,11 +201,11 @@ table when an entry has metadata, since full metadata display belongs to the
 detail panel (`UX-03`).
 
 **Acceptance criteria:**
-- [ ] Filter matches substrings found in transaction or posting metadata
+- [x] Filter matches substrings found in transaction or posting metadata
       values.
-- [ ] Table row indicates when an entry has metadata beyond the standard
+- [x] Table row indicates when an entry has metadata beyond the standard
       fields.
-- [ ] Test covering filter-by-metadata-value.
+- [x] Test covering filter-by-metadata-value.
 
 ---
 
