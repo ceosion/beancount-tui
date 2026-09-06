@@ -196,7 +196,12 @@ def filter_transactions(
 
 def _entry_search_text(entry: data.Directive) -> str:
     if isinstance(entry, data.Transaction):
-        return f"{entry.payee or ''} {entry.narration or ''}"
+        text = f"{entry.payee or ''} {entry.narration or ''}"
+        if entry.tags:
+            text += " " + " ".join(sorted(entry.tags))
+        if entry.links:
+            text += " " + " ".join(sorted(entry.links))
+        return text
     parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
     if isinstance(entry, data.Note):
         parts.append(entry.comment)

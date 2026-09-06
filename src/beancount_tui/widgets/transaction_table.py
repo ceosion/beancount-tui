@@ -49,7 +49,11 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
     """
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
-        return (date, entry.flag or "*", entry.payee or "", entry.narration or "",
+        narration = entry.narration or ""
+        tags_links = _tags_links_summary(entry)
+        if tags_links:
+            narration = f"{narration} {tags_links}".strip()
+        return (date, entry.flag or "*", entry.payee or "", narration,
                 transaction_amount(entry))
     if isinstance(entry, data.Open):
         return (date, "open", "", entry.account, ", ".join(entry.currencies or []))
@@ -84,3 +88,10 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
             summary = f"! {summary}"
         return (date, "document", "", summary, "")
     return (date, type(entry).__name__.lower(), "", "", "")
+
+
+def _tags_links_summary(entry: data.Transaction) -> str:
+    """Render a transaction's tags/links as ``#tag ^link`` text for display."""
+    tokens = [f"#{tag}" for tag in sorted(entry.tags or ())]
+    tokens += [f"^{link}" for link in sorted(entry.links or ())]
+    return " ".join(tokens)
