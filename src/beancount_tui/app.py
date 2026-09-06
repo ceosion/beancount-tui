@@ -13,6 +13,7 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
 from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
+from beancount_tui.importer import ImportCandidate
 from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
@@ -20,6 +21,7 @@ from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormRes
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
+from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
@@ -88,6 +90,7 @@ class BeancountTUI(App):
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
         ("L", "ledger_info", "Ledger info"),
+        ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
@@ -167,6 +170,19 @@ class BeancountTUI(App):
 
     def action_help(self) -> None:
         self.push_screen(HelpScreen(self.BINDINGS))
+
+    def action_import_csv(self) -> None:
+        def on_result(candidates: list[ImportCandidate] | None) -> None:
+            if candidates is None:
+                return
+            errors = sum(1 for c in candidates if c.error)
+            summary = f"Parsed {len(candidates)} row(s)"
+            if errors:
+                summary += f", {errors} with errors"
+            summary += "."
+            self.notify(summary)
+
+        self.push_screen(ImportForm(), on_result)
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)

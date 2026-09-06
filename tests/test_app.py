@@ -1,9 +1,10 @@
 """End-to-end smoke tests driving the Textual app."""
 
 import datetime
+from pathlib import Path
 
 from beancount.core import data
-from textual.widgets import OptionList, Select
+from textual.widgets import DataTable, OptionList, Select
 
 from beancount_tui.app import BeancountTUI
 from beancount_tui.editor import append_entry
@@ -12,6 +13,7 @@ from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
+from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
@@ -20,6 +22,8 @@ from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
+
+FIXTURE_CSV = Path(__file__).parent / "fixtures" / "sample_import.csv"
 
 
 async def _pick_directive_type(pilot, keyword: str) -> None:
@@ -1147,3 +1151,79 @@ def _find_node(node, account):
         if found is not None:
             return found
     return None
+
+
+async def test_import_csv_via_form(ledger_path):
+    app = BeancountTUI(ledger_path)
+    results = []
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(ImportForm(), lambda candidates: results.append(candidates))
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+
+        form.query_one("#path").value = str(FIXTURE_CSV)
+        form._load_preview()
+        await pilot.pause()
+
+        preview = form.query_one("#preview", DataTable)
+        assert preview.row_count == 5
+
+        form.query_one("#col-date", Select).value = "Date"
+        form.query_one("#col-amount", Select).value = "Amount"
+        form.query_one("#col-payee", Select).value = "Merchant"
+        form.query_one("#col-narration", Select).value = "Description"
+        form.query_one("#account").value = "Assets:Checking"
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportForm)
+
+    assert len(results) == 1
+    candidates = results[0]
+    assert candidates is not None
+    assert len(candidates) == 5
+    assert candidates[0].payee == "Corner Cafe"
+    assert candidates[0].narration == "Coffee and pastry"
+    assert candidates[0].account == "Assets:Checking"
+    assert sum(1 for c in candidates if c.error is not None) == 2
+
+    # The malformed rows are reported, not dropped or fatal.
+    bad_date = next(c for c in candidates if c.row_number == 3)
+    assert bad_date.date is None
+    assert bad_date.error is not None
+    bad_amount = next(c for c in candidates if c.row_number == 4)
+    assert bad_amount.amount is None
+    assert bad_amount.error is not None
+
+    # Nothing gets written to the ledger at this stage.
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert len(ledger.transactions) == 6
+
+
+async def test_import_csv_binding_notifies_summary(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+
+        form.query_one("#path").value = str(FIXTURE_CSV)
+        form._load_preview()
+        await pilot.pause()
+
+        form.query_one("#col-date", Select).value = "Date"
+        form.query_one("#col-amount", Select).value = "Amount"
+        form.query_one("#account").value = "Assets:Checking"
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportForm)
