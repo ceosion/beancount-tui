@@ -265,7 +265,12 @@ class BeancountTUI(App):
                 self.notify(summary)
 
             self.push_screen(
-                ImportReviewScreen(candidates, accounts=self.ledger.accounts), on_review
+                ImportReviewScreen(
+                    candidates,
+                    accounts=self.ledger.accounts,
+                    existing_transactions=self.ledger.transactions_for_account(None),
+                ),
+                on_review,
             )
 
         self.push_screen(ImportForm(), on_candidates)

@@ -1655,8 +1655,14 @@ async def test_import_review_partial_selection(ledger_path):
         assert len(review._rows) == 5
 
         # Rows 3/4 (bad date / bad amount) carry a parse error and default unchecked.
+        # Row 1 (Green Grocer, 2026-01-06 -87.35 -> Assets:Checking) matches the
+        # ledger's existing "Weekly groceries" entry and defaults unchecked as a
+        # possible duplicate (IMP-03), with the reason visible on the checkbox label.
         assert review._rows[0].checked is True  # Corner Cafe
-        assert review._rows[1].checked is True  # Green Grocer
+        assert review._rows[1].checked is False  # Green Grocer - possible duplicate
+        assert review._rows[1].duplicate_reason is not None
+        assert "duplicate" in review._rows[1].duplicate_reason
+        assert "duplicate" in str(review.query_one("#check-1", Checkbox).label)
         assert review._rows[2].checked is False  # bad date row
         assert review._rows[3].checked is False  # bad amount row
         assert review._rows[4].checked is True  # Acme Corp paycheck
@@ -1665,6 +1671,12 @@ async def test_import_review_partial_selection(ledger_path):
         review.query_one("#check-0", Checkbox).value = False
         await pilot.pause()
         assert review._rows[0].checked is False
+
+        # Re-check Green Grocer anyway: the duplicate flag is a warning, not a
+        # hard block, and the user can decide to import it after all.
+        review.query_one("#check-1", Checkbox).value = True
+        await pilot.pause()
+        assert review._rows[1].checked is True
 
         review._do_import()
         await pilot.pause()
