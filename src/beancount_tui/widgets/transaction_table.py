@@ -60,4 +60,7 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         return (date, "pad", "", f"{entry.account} from {entry.source_account}", "")
     if isinstance(entry, data.Note):
         return (date, "note", "", f"{entry.account}: {entry.comment}", "")
+    if isinstance(entry, data.Price):
+        return (date, "price", "", entry.currency,
+                f"{entry.amount.number} {entry.amount.currency}")
     return (date, type(entry).__name__.lower(), "", "", "")

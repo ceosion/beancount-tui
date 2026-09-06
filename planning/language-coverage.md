@@ -53,7 +53,7 @@ same infrastructure to add new directive types.
 
 ### LANG-02: Price directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -63,11 +63,11 @@ CCY`), and add it to the LANG-01 type picker with a template like
 `2026-09-06 price HOOL  100.00 USD`.
 
 **Acceptance criteria:**
-- [ ] `Price` entries appear in the table when directives are toggled on.
-- [ ] Row shows date, keyword, commodity, and quoted price.
-- [ ] Creatable via the LANG-01 picker; editable/deletable like existing
+- [x] `Price` entries appear in the table when directives are toggled on.
+- [x] Row shows date, keyword, commodity, and quoted price.
+- [x] Creatable via the LANG-01 picker; editable/deletable like existing
       types (already generic, just needs the `DISPLAYED_DIRECTIVES` entry).
-- [ ] Test covering display and round-trip creation.
+- [x] Test covering display and round-trip creation.
 
 ---
 

@@ -367,7 +367,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         assert isinstance(picker, DirectiveTypePicker)
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
-        assert ids == {"open", "close", "balance", "pad", "note"}
+        assert ids == {"open", "close", "balance", "pad", "note", "price"}
 
         await pilot.press("escape")
         await pilot.pause()
@@ -488,6 +488,46 @@ async def test_add_note_directive(ledger_path):
     assert not ledger.errors
     notes = [e for e in ledger.entries if isinstance(e, data.Note)]
     assert any(n.comment == "Reviewed year to date" for n in notes)
+
+
+async def test_add_price_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "price")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "price FIXME" in form.query_one("#text").text
+
+        form.query_one("#text").text = "2026-09-06 price HOOL  100.00 USD"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    prices = [e for e in ledger.entries if isinstance(e, data.Price)]
+    assert any(
+        p.currency == "HOOL" and str(p.amount.number) == "100.00" and p.amount.currency == "USD"
+        for p in prices
+    )
+
+
+async def test_price_directive_displayed_in_table(ledger_path):
+    append_entry(ledger_path, "2026-09-06 price HOOL  100.00 USD")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        row_index = next(
+            i for i, e in enumerate(table.shown) if isinstance(e, data.Price)
+        )
+        row = table.get_row_at(row_index)
+        assert tuple(row) == ("2026-09-06", "price", "", "HOOL", "100.00 USD")
 
 
 async def test_add_directive_into_included_file(multi_ledger_path):
