@@ -18,6 +18,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("price", "Price — record a price quote"),
     ("event", "Event — record a dated event value"),
     ("custom", "Custom — a user-defined directive"),
+    ("query", "Query — a named BQL query"),
 )
 
 

@@ -22,6 +22,7 @@ DISPLAYED_DIRECTIVES = (
     data.Price,
     data.Event,
     data.Custom,
+    data.Query,
 )
 
 

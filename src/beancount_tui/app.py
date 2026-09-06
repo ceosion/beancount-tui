@@ -34,6 +34,7 @@ _DIRECTIVE_TEMPLATES = {
     "price": "{date} price FIXME  0.00 USD",
     "event": '{date} event "location" "FIXME"',
     "custom": '{date} custom "budget" "FIXME"',
+    "query": '{date} query "FIXME" "SELECT account, sum(position) GROUP BY account"',
 }
 
 

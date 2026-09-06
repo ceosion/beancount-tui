@@ -146,7 +146,7 @@ entry.values`.
 
 ### LANG-07: Query directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -155,10 +155,10 @@ the ledger, e.g. `2026-09-06 query "cash" "SELECT ..."`). Display only here
 — actually *running* a query (named or ad hoc) is `RPT-06`.
 
 **Acceptance criteria:**
-- [ ] `Query` entries display with name and a truncated view of the query
+- [x] `Query` entries display with name and a truncated view of the query
       text.
-- [ ] Creatable via the LANG-01 picker.
-- [ ] Test covering display and round-trip creation.
+- [x] Creatable via the LANG-01 picker.
+- [x] Test covering display and round-trip creation.
 
 ---
 
