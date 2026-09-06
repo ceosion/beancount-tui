@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from beancount import loader
-from beancount.core import data, getters, realization
+from beancount.core import data, getters, prices, realization
 from beancount.core.inventory import Inventory
 
 
@@ -94,6 +94,8 @@ class Ledger:
     entries: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     options: dict = field(default_factory=dict)
+    # Lazily built and cached; invalidated on reload. Not part of equality.
+    _price_map: object = field(default=None, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: str | Path) -> "Ledger":
@@ -103,6 +105,7 @@ class Ledger:
 
     def reload(self) -> None:
         self.entries, self.errors, self.options = loader.load_file(str(self.path))
+        self._price_map = None
 
     @property
     def transactions(self) -> list[data.Transaction]:
@@ -322,6 +325,59 @@ class Ledger:
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""
         return realization.realize(self.entries)
+
+    def _price_map_cached(self):
+        """The ledger's price map (from ``Price`` directives), built once and
+        cached until the next :meth:`reload`."""
+        if self._price_map is None:
+            self._price_map = prices.build_price_map(self.entries)
+        return self._price_map
+
+    def converted_total(self, inventory: Inventory) -> tuple[Decimal | None, list[str]]:
+        """Convert ``inventory`` to the ledger's primary operating currency.
+
+        The "primary" operating currency is the first entry of
+        ``options["operating_currency"]`` (that list's order is the
+        ledger's own priority ordering; multiple operating currencies aren't
+        otherwise handled here). Conversion rates come from
+        ``beancount.core.prices.build_price_map`` over all of the ledger's
+        ``Price`` directives, using the latest available price for each
+        currency (no as-of date).
+
+        Returns ``(total, unpriced)``: ``total`` is the summed value in the
+        operating currency, or ``None`` if no operating currency is
+        configured or none of the inventory's currencies could be valued at
+        all. ``unpriced`` lists (in currency order) any currencies that
+        couldn't be converted — these are excluded from ``total`` rather
+        than silently included as zero.
+        """
+        operating_currencies = self.options.get("operating_currency") or []
+        if not operating_currencies:
+            return None, []
+        target = operating_currencies[0]
+        price_map = self._price_map_cached()
+        positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
+        total = Decimal(0)
+        unpriced: list[str] = []
+        found_any = False
+        for pos in positions:
+            currency = pos.units.currency
+            number = pos.units.number
+            if number is None:
+                continue
+            if currency == target:
+                total += number
+                found_any = True
+                continue
+            _, rate = prices.get_price(price_map, (currency, target))
+            if rate is None:
+                unpriced.append(currency)
+                continue
+            total += number * rate
+            found_any = True
+        if not found_any:
+            return None, unpriced
+        return total, unpriced
 
 
 def filter_transactions(

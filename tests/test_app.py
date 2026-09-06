@@ -1494,6 +1494,42 @@ async def test_account_tree_rolls_up_child_balances(ledger_path):
         assert "151.55 USD" in tree._amounts[food.id]
 
 
+async def test_account_tree_shows_converted_total_and_missing_price(ledger_path):
+    # examples/example.beancount already sets operating_currency to USD.
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Brokerage  AAPL,USD\n\n"
+        "2026-01-02 price AAPL 175.32 USD\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Brokerage  50 AAPL\n"
+        "  Assets:Brokerage  100.00 USD\n"
+        "  Assets:Checking  -8866.00 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one(AccountTree)
+        brokerage = _find_node(tree.root, "Assets:Brokerage")
+        assert brokerage is not None
+        amounts = tree._amounts[brokerage.id]
+        assert "50 AAPL" in amounts
+        assert "100.00 USD" in amounts
+        # 100.00 USD + 50 * 175.32 USD == 8,866.00 USD.
+        assert "≈ 8,866.00 USD" in amounts
+
+
+async def test_account_tree_no_converted_total_when_single_operating_currency(ledger_path):
+    # Assets:Checking only ever holds USD, the ledger's own operating
+    # currency, so there's nothing to convert and no note should appear.
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one(AccountTree)
+        checking = _find_node(tree.root, "Assets:Checking")
+        assert checking is not None
+        assert "≈" not in tree._amounts[checking.id]
+
+
 def _find_node(node, account):
     if node.data == account:
         return node
