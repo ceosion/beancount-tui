@@ -646,16 +646,8 @@ def format_inventory(inventory: Inventory) -> str:
     return ", ".join(f"{pos.units.number:,} {pos.units.currency}" for pos in positions)
 
 
-def transaction_amount(txn: data.Transaction) -> str:
-    """A one-line summary of a transaction's magnitude, e.g. ``120.50 USD``.
-
-    Sums the absolute value of positive postings per currency; transactions
-    always balance, so this is the amount that changed hands. Postings with a
-    cost basis (``10 HOOL {500.00 USD}``) or a price annotation
-    (``10 HOOL @ 55.00 USD``) contribute their cost/price currency amount
-    (e.g. ``5,000.00 USD``) rather than the raw commodity quantity, since
-    that's far more useful for at-a-glance scanning.
-    """
+def _transaction_amount_inventory(txn: data.Transaction) -> Inventory:
+    """The inventory of positive-posting magnitudes underlying ``transaction_amount``."""
     inventory = Inventory()
     for posting in txn.postings:
         if posting.units is not None and posting.units.number is not None:
@@ -670,4 +662,29 @@ def transaction_amount(txn: data.Transaction) -> str:
                         amount.number * posting.price.number, posting.price.currency
                     )
                 inventory.add_amount(amount)
-    return format_inventory(inventory)
+    return inventory
+
+
+def transaction_amount(txn: data.Transaction) -> str:
+    """A one-line summary of a transaction's magnitude, e.g. ``120.50 USD``.
+
+    Sums the absolute value of positive postings per currency; transactions
+    always balance, so this is the amount that changed hands. Postings with a
+    cost basis (``10 HOOL {500.00 USD}``) or a price annotation
+    (``10 HOOL @ 55.00 USD``) contribute their cost/price currency amount
+    (e.g. ``5,000.00 USD``) rather than the raw commodity quantity, since
+    that's far more useful for at-a-glance scanning.
+    """
+    return format_inventory(_transaction_amount_inventory(txn))
+
+
+def transaction_amount_value(txn: data.Transaction) -> Decimal:
+    """The numeric magnitude backing ``transaction_amount``, for sorting.
+
+    Sums the (possibly multiple, mixed-currency) position numbers from the
+    same inventory ``transaction_amount`` formats; mixed-currency
+    transactions are rare, and a single sortable number is more useful here
+    than a currency-aware comparison.
+    """
+    positions = _transaction_amount_inventory(txn).get_positions()
+    return sum((pos.units.number for pos in positions), Decimal(0))
