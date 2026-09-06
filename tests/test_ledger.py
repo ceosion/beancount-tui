@@ -263,3 +263,69 @@ def test_root_account_has_balances(ledger_path):
     amounts = {(pos.units.number, pos.units.currency) for pos in balance}
     # 2500 + 4200 - 87.35 - 1450 - 64.20 - 1000
     assert amounts == {(Decimal("4098.45"), "USD")}
+
+
+def test_register_running_balance(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.register("Assets:Checking")
+    # Known sequence for Assets:Checking in examples/example.beancount, in
+    # date order, each posting amount and the running balance after it.
+    assert [
+        (
+            r.date,
+            r.narration,
+            format_inventory(r.posting_amount),
+            format_inventory(r.running_balance),
+        )
+        for r in rows
+    ] == [
+        (datetime.date(2026, 1, 1), "Opening balance", "2,500.00 USD", "2,500.00 USD"),
+        (datetime.date(2026, 1, 5), "Salary", "4,200.00 USD", "6,700.00 USD"),
+        (datetime.date(2026, 1, 6), "Weekly groceries", "-87.35 USD", "6,612.65 USD"),
+        (datetime.date(2026, 1, 10), "January rent", "-1,450.00 USD", "5,162.65 USD"),
+        (datetime.date(2026, 1, 14), "Dinner with friends", "-64.20 USD", "5,098.45 USD"),
+        (datetime.date(2026, 1, 15), "Transfer to savings", "-1,000.00 USD", "4,098.45 USD"),
+    ]
+    # Rows are in date order.
+    assert [r.date for r in rows] == sorted(r.date for r in rows)
+
+
+def test_register_none_account_returns_empty(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.register("Assets:Nonexistent") == []
+
+
+def test_register_multiple_currencies_kept_separate(tmp_path):
+    path = tmp_path / "multi-currency.beancount"
+    path.write_text(
+        'option "title" "Multi-currency Ledger"\n'
+        "\n"
+        "2026-01-01 open Assets:Wallet\n"
+        "2026-01-01 open Income:Salary\n"
+        "2026-01-01 open Income:Freelance\n"
+        "\n"
+        '2026-01-02 * "Employer" "USD salary"\n'
+        "  Assets:Wallet    100.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-03 * "Client" "EUR invoice"\n'
+        "  Assets:Wallet     50.00 EUR\n"
+        "  Income:Freelance\n"
+        "\n"
+        '2026-01-04 * "Employer" "USD salary"\n'
+        "  Assets:Wallet     20.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(path)
+    assert not ledger.errors
+    rows = ledger.register("Assets:Wallet")
+    balances = [format_inventory(r.running_balance) for r in rows]
+    # Each currency accumulates independently; they never mix into one total.
+    assert balances == [
+        "100.00 USD",
+        "50.00 EUR, 100.00 USD",
+        "50.00 EUR, 120.00 USD",
+    ]
+    posting_amounts = [format_inventory(r.posting_amount) for r in rows]
+    assert posting_amounts == ["100.00 USD", "50.00 EUR", "20.00 USD"]
