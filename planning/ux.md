@@ -6,7 +6,7 @@ Usability improvements that aren't tied to a specific Beancount feature.
 
 ### UX-01: Help screen
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -16,10 +16,10 @@ bindings worth surfacing), since the footer is getting crowded and new
 bindings keep landing across the `LANG`/`RPT`/`EDIT` tasks.
 
 **Acceptance criteria:**
-- [ ] `?` opens a modal listing key → action → description for all
+- [x] `?` opens a modal listing key → action → description for all
       top-level app bindings.
-- [ ] Modal is dismissible (`escape` or a close button).
-- [ ] Test covering the modal opens and lists the expected bindings.
+- [x] Modal is dismissible (`escape` or a close button).
+- [x] Test covering the modal opens and lists the expected bindings.
 
 ---
 
