@@ -18,16 +18,30 @@ class TransactionParseError(Exception):
     """The text entered by the user is not a single valid transaction."""
 
 
+def parse_directives_text(text: str) -> list[data.Directive]:
+    """Parse user-entered text into however many directives it contains.
+
+    Raises :class:`TransactionParseError` with a readable message if the text
+    has syntax errors. Unlike :func:`parse_directive_text`, this does not
+    require exactly one directive — it's used where a form intentionally
+    holds more than one (e.g. a `pad` directive immediately followed by its
+    `balance` assertion), so each can still be validated with the real
+    Beancount parser rather than skipped.
+    """
+    entries, errors, _ = parser.parse_string(text)
+    if errors:
+        messages = "; ".join(error.message for error in errors)
+        raise TransactionParseError(messages)
+    return entries
+
+
 def parse_directive_text(text: str) -> data.Directive:
     """Parse user-entered text into exactly one directive of any type.
 
     Raises :class:`TransactionParseError` with a readable message if the text
     has syntax errors or does not contain exactly one directive.
     """
-    entries, errors, _ = parser.parse_string(text)
-    if errors:
-        messages = "; ".join(error.message for error in errors)
-        raise TransactionParseError(messages)
+    entries = parse_directives_text(text)
     if len(entries) != 1:
         raise TransactionParseError("Expected exactly one directive.")
     return entries[0]

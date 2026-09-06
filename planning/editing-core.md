@@ -79,7 +79,7 @@ currency that can't be converted.
 
 ### EDIT-04: Pad-and-verify reconciliation helper
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** EDIT-02
 - **Effort:** 1h
 
@@ -90,9 +90,10 @@ assertion from `EDIT-02`, so reconciling an account against a statement is a
 single action instead of two manual directive entries.
 
 **Acceptance criteria:**
-- [ ] Binding inserts both a `pad` and the matching `balance` directive in
+- [x] Binding inserts both a `pad` and the matching `balance` directive in
       one action, correctly ordered (pad before balance, same date).
-- [ ] If no prior pad-source account can be inferred for the selected
+- [x] If no prior pad-source account can be inferred for the selected
       account, the user is prompted to pick one.
-- [ ] Test covering the generated pad+balance pair against a reconciliation
+- [x] Test covering the generated pad+balance pair against a reconciliation
       scenario.
+

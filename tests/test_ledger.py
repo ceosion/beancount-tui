@@ -2,6 +2,7 @@ import datetime
 from decimal import Decimal
 from pathlib import Path
 
+import beanquery
 import pytest
 from beancount.core import realization
 
@@ -10,6 +11,7 @@ from beancount_tui.ledger import (
     Ledger,
     filter_transactions,
     format_inventory,
+    format_query_value,
     parse_date_range,
     resolve_date_preset,
     transaction_amount,
@@ -501,3 +503,40 @@ def test_register_multiple_currencies_kept_separate(tmp_path):
     ]
     posting_amounts = [format_inventory(r.posting_amount) for r in rows]
     assert posting_amounts == ["100.00 USD", "50.00 EUR", "20.00 USD"]
+
+
+def test_run_query_returns_columns_and_rows(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    result = ledger.run_query("SELECT account, sum(position) AS total GROUP BY account")
+    assert result.columns == ["account", "total"]
+    rendered = {row[0]: format_query_value(row[1]) for row in result.rows}
+    assert rendered["Assets:Checking"] == "4,098.45 USD"
+
+
+def test_run_query_bad_syntax_raises_beanquery_error(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    with pytest.raises(beanquery.Error):
+        ledger.run_query("SELEKT accountz")
+
+
+def test_run_query_unknown_column_raises_beanquery_error(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    with pytest.raises(beanquery.Error):
+        ledger.run_query("SELECT no_such_column FROM postings")
+
+
+def test_format_query_value_renders_none_as_empty_string():
+    assert format_query_value(None) == ""
+    assert format_query_value("Assets:Checking") == "Assets:Checking"
+
+
+def test_ledger_queries_lists_query_directives(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-03-01 query "cash" "SELECT account, sum(position) GROUP BY account"\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert len(ledger.queries) == 1
+    assert ledger.queries[0].name == "cash"
+    assert ledger.queries[0].query_string == "SELECT account, sum(position) GROUP BY account"

@@ -15,7 +15,7 @@ from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
 from textual.widgets import Button, Label, Select, Static, TextArea
 
-from beancount_tui.editor import TransactionParseError, parse_directive_text
+from beancount_tui.editor import TransactionParseError, parse_directives_text
 
 
 @dataclass
@@ -71,12 +71,19 @@ class DirectiveForm(ModalScreen[DirectiveFormResult | None]):
         *,
         title: str = "Edit directive",
         files: list[Path] | None = None,
+        expected_directives: int = 1,
     ) -> None:
         super().__init__()
         self._text = text
         self._title = title
         # Offer a target-file picker only when there is a real choice.
         self._files = files if files and len(files) > 1 else None
+        # Normally the text box holds exactly one directive. A caller that
+        # deliberately combines several into one editable block (e.g. a
+        # `pad` directive immediately followed by its `balance` assertion)
+        # can raise this so save-time validation expects that many instead
+        # of rejecting the block as "not exactly one directive".
+        self._expected_directives = expected_directives
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -106,9 +113,16 @@ class DirectiveForm(ModalScreen[DirectiveFormResult | None]):
     def _save(self) -> None:
         text = self.query_one("#text", TextArea).text
         try:
-            parse_directive_text(text)
+            entries = parse_directives_text(text)
         except TransactionParseError as exc:
             self.query_one("#error", Static).update(str(exc))
+            return
+        if len(entries) != self._expected_directives:
+            if self._expected_directives == 1:
+                message = "Expected exactly one directive."
+            else:
+                message = f"Expected exactly {self._expected_directives} directives."
+            self.query_one("#error", Static).update(message)
             return
         filename = None
         if self._files:

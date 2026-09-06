@@ -25,6 +25,8 @@ dependencies = [
     # (Termux) — making source builds impossible there. 3.2.0 builds from source
     # with just meson and system flex/bison.
     "beancount>=3.0.0,<3.2.1",
+    "beangulp>=0.2.0",
+    "beanquery>=0.2.0",
     "textual>=0.80.0",
 ]
 
@@ -55,6 +57,9 @@ packages = ["src/beancount_tui"]
 [tool.ruff]
 line-length = 100
 src = ["src", "tests"]
+# Deliberately-invalid Python used to test the "module fails to load" error
+# path (IMP-04); ruff can't parse it, by design.
+extend-exclude = ["tests/fixtures/broken_beangulp_importer.py"]
 
 [tool.ruff.lint]
 # Pin the rule families explicitly so ruff upgrades can't silently widen
