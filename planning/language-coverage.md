@@ -127,7 +127,7 @@ dangling `document` directive is a common ledger-hygiene issue.
 
 ### LANG-06: Custom directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -137,10 +137,10 @@ date, `"custom"`, `entry.type`, and a joined string of `v.value for v in
 entry.values`.
 
 **Acceptance criteria:**
-- [ ] `Custom` entries display with their type and joined values.
-- [ ] Creatable via the LANG-01 picker with a generic template
+- [x] `Custom` entries display with their type and joined values.
+- [x] Creatable via the LANG-01 picker with a generic template
       (`2026-09-06 custom "budget" ...`).
-- [ ] Test covering display and round-trip creation.
+- [x] Test covering display and round-trip creation.
 
 ---
 

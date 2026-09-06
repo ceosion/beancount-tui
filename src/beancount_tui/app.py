@@ -31,6 +31,7 @@ _DIRECTIVE_TEMPLATES = {
     "balance": "{date} balance Assets:FIXME  0.00 USD",
     "pad": "{date} pad Assets:FIXME Equity:Opening-Balances",
     "note": '{date} note Assets:FIXME "FIXME"',
+    "custom": '{date} custom "budget" "FIXME"',
 }
 
 
