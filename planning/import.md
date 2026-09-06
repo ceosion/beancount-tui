@@ -8,7 +8,7 @@ useful, testable increment.
 
 ### IMP-01: CSV load and column mapping
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -19,14 +19,14 @@ imported), then parse the full file into a list of candidate transactions
 held in memory (not yet written anywhere — that's `IMP-02`).
 
 **Acceptance criteria:**
-- [ ] User can point at a CSV file and see a preview of its rows.
-- [ ] User maps date/amount/payee/narration to columns and picks the target
+- [x] User can point at a CSV file and see a preview of its rows.
+- [x] User maps date/amount/payee/narration to columns and picks the target
       account.
-- [ ] Parsing produces an in-memory list of candidate `data.Transaction`-like
+- [x] Parsing produces an in-memory list of candidate `data.Transaction`-like
       structures (need not be full Beancount `Transaction` objects yet).
-- [ ] Malformed rows (bad date, non-numeric amount) are reported per-row,
+- [x] Malformed rows (bad date, non-numeric amount) are reported per-row,
       not a hard failure of the whole import.
-- [ ] Test covering column mapping and parsing against a small fixture CSV.
+- [x] Test covering column mapping and parsing against a small fixture CSV.
 
 ---
 

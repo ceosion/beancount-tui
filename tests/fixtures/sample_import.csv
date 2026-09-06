@@ -1,0 +1,6 @@
+Date,Amount,Description,Merchant
+2026-01-05,-12.50,Coffee and pastry,Corner Cafe
+2026-01-06,-87.35,Weekly groceries,Green Grocer
+not-a-date,-20.00,Bad date row,Mystery Vendor
+2026-01-08,not-a-number,Bad amount row,Mystery Vendor
+2026-01-09,1500.00,Paycheck,Acme Corp
