@@ -24,6 +24,7 @@ from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
@@ -89,6 +90,7 @@ class BeancountTUI(App):
         ("u", "undo", "Undo"),
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
+        ("g", "register", "Register"),
         ("L", "ledger_info", "Ledger info"),
         ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
@@ -164,6 +166,12 @@ class BeancountTUI(App):
 
     def action_trial_balance(self) -> None:
         self.push_screen(TrialBalanceScreen(self.ledger))
+
+    def action_register(self) -> None:
+        if self.selected_account is None:
+            self.notify("No account selected.", severity="warning")
+            return
+        self.push_screen(RegisterScreen(self.ledger, self.selected_account))
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))

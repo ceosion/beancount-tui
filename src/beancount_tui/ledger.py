@@ -29,6 +29,22 @@ DISPLAYED_DIRECTIVES = (
 
 
 @dataclass
+class RegisterRow:
+    """One line of a register report: a transaction's effect on an account.
+
+    ``posting_amount`` is the sum of that transaction's posting(s) to the
+    account (or its sub-accounts) — usually one posting, but a transaction
+    could post to the account and a sub-account, or the account twice.
+    ``running_balance`` is the cumulative balance immediately after this row.
+    """
+
+    date: datetime.date
+    narration: str
+    posting_amount: Inventory
+    running_balance: Inventory
+
+
+@dataclass
 class IncomeStatement:
     """Per-account and total Income/Expenses balances over a period.
 
@@ -185,6 +201,38 @@ class Ledger:
             for txn in self.transactions
             if any(p.account == account or p.account.startswith(prefix) for p in txn.postings)
         ]
+
+    def register(self, account: str) -> list[RegisterRow]:
+        """Per-transaction posting amount and running balance for ``account``.
+
+        Mirrors ``bean-report register ACCOUNT``: every transaction posting
+        to ``account`` or any of its sub-accounts, in date order, each with
+        that transaction's posting(s) to the account summed into a single
+        amount and the running balance immediately after. Multiple
+        currencies coexist in each ``Inventory`` without mixing.
+        """
+        prefix = account + ":"
+        txns = sorted(self.transactions_for_account(account), key=lambda txn: txn.date)
+        running = Inventory()
+        rows: list[RegisterRow] = []
+        for txn in txns:
+            posting_amount = Inventory()
+            for posting in txn.postings:
+                if posting.account != account and not posting.account.startswith(prefix):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                posting_amount.add_amount(posting.units)
+            running.add_inventory(posting_amount)
+            rows.append(
+                RegisterRow(
+                    date=txn.date,
+                    narration=txn.narration,
+                    posting_amount=posting_amount,
+                    running_balance=Inventory(running),
+                )
+            )
+        return rows
 
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""

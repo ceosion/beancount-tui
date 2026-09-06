@@ -19,6 +19,7 @@ from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
@@ -1075,6 +1076,43 @@ async def test_trial_balance_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, TrialBalanceScreen)
+
+
+async def test_register_screen(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Assets:Checking"
+        await pilot.press("g")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, RegisterScreen)
+
+        table = screen.query_one("#report", DataTable)
+        rows = [
+            tuple(str(cell) for cell in table.get_row_at(i)) for i in range(table.row_count)
+        ]
+        assert rows[0] == ("2026-01-01", "Opening balance", "2,500.00 USD", "2,500.00 USD")
+        assert rows[-1] == (
+            "2026-01-15",
+            "Transfer to savings",
+            "-1,000.00 USD",
+            "4,098.45 USD",
+        )
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, RegisterScreen)
+
+
+async def test_register_requires_selected_account(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.selected_account is None
+        await pilot.press("g")
+        await pilot.pause()
+        assert not isinstance(app.screen, RegisterScreen)
 
 
 async def test_ledger_info_screen(ledger_path):
