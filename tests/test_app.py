@@ -14,6 +14,7 @@ from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
@@ -1101,6 +1102,30 @@ async def test_ledger_info_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, LedgerInfoScreen)
+
+
+async def test_help_screen(ledger_path):
+    from textual.widgets import DataTable
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("?")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, HelpScreen)
+
+        table = screen.query_one("#bindings", DataTable)
+        rows = [
+            (str(table.get_row_at(i)[0]), str(table.get_row_at(i)[1]))
+            for i in range(table.row_count)
+        ]
+        for key, _action, description in BeancountTUI.BINDINGS:
+            assert (key, description) in rows
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, HelpScreen)
 
 
 async def test_account_tree_rolls_up_child_balances(ledger_path):

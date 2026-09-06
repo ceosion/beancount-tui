@@ -19,6 +19,7 @@ from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
@@ -90,6 +91,7 @@ class BeancountTUI(App):
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
+        ("question_mark", "help", "Help"),
     ]
 
     def __init__(self, ledger_path: str | Path, watch_interval: float = 1.0) -> None:
@@ -162,6 +164,9 @@ class BeancountTUI(App):
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))
+
+    def action_help(self) -> None:
+        self.push_screen(HelpScreen(self.BINDINGS))
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)
