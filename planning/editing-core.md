@@ -7,7 +7,7 @@ delete/single-slot undo).
 
 ### EDIT-01: Multi-level undo/redo
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -18,11 +18,11 @@ undo and cleared on any new write. Add a `U` (shift) or similar binding for
 redo alongside the existing `u` for undo.
 
 **Acceptance criteria:**
-- [ ] At least the last 20 writes to a file can be undone in sequence.
-- [ ] Redo restores an undone change; a new write clears the redo stack.
-- [ ] Undo/redo across writes touching *different* files in a multi-file
+- [x] At least the last 20 writes to a file can be undone in sequence.
+- [x] Redo restores an undone change; a new write clears the redo stack.
+- [x] Undo/redo across writes touching *different* files in a multi-file
       ledger works independently per file.
-- [ ] Test covering undo-undo-redo-redo across 3+ sequential edits.
+- [x] Test covering undo-undo-redo-redo across 3+ sequential edits.
 
 ---
 

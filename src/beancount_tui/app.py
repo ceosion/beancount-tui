@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import datetime
 import sys
+from collections import deque
 from pathlib import Path
 
 from beancount.core import data, getters
@@ -51,6 +52,63 @@ def _directive_template(keyword: str, date: str) -> str:
     return _DIRECTIVE_TEMPLATES[keyword].format(date=date)
 
 
+# How many writes back the undo history reaches (per acceptance criterion:
+# "at least the last 20 writes ... can be undone in sequence").
+UNDO_HISTORY_LIMIT = 20
+
+
+class UndoManager:
+    """A bounded, chronological undo/redo history spanning every file in the
+    ledger.
+
+    Snapshots are ``(path, content)`` pairs recording a file's content
+    immediately *before* a write to it. Both stacks are global (not one per
+    file) so a single `undo`/`redo` keypress, which carries no file
+    argument, always has an unambiguous "most recent change" to act on.
+    Because each snapshot remembers its own path, popping one only ever
+    touches the file it belongs to — so undoing a change to file A never
+    disturbs file B, even if they're interleaved in the history.
+    """
+
+    def __init__(self, limit: int = UNDO_HISTORY_LIMIT) -> None:
+        self._undo: deque[tuple[Path, str]] = deque(maxlen=limit)
+        self._redo: deque[tuple[Path, str]] = deque(maxlen=limit)
+
+    def record(self, path: Path, content: str) -> None:
+        """Record `content` as the pre-write state of `path`.
+
+        Called just before every mutating action. A new write invalidates
+        any pending redo.
+        """
+        self._undo.append((path, content))
+        self._redo.clear()
+
+    def can_undo(self) -> bool:
+        return bool(self._undo)
+
+    def can_redo(self) -> bool:
+        return bool(self._redo)
+
+    def pop_undo(self) -> tuple[Path, str] | None:
+        """Pop and return the most recent undo snapshot, or ``None``."""
+        return self._undo.pop() if self._undo else None
+
+    def pop_redo(self) -> tuple[Path, str] | None:
+        """Pop and return the most recent redo snapshot, or ``None``."""
+        return self._redo.pop() if self._redo else None
+
+    def push_redo(self, path: Path, content: str) -> None:
+        """Save `content` (the state being overwritten by an undo) so a
+        subsequent redo can restore it."""
+        self._redo.append((path, content))
+
+    def push_undo(self, path: Path, content: str) -> None:
+        """Save `content` (the state being overwritten by a redo) back onto
+        the undo stack, without touching the redo stack — so a redo can
+        itself be undone."""
+        self._undo.append((path, content))
+
+
 class BeancountTUI(App):
     """Browse and edit a Beancount ledger."""
 
@@ -89,6 +147,7 @@ class BeancountTUI(App):
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
         ("u", "undo", "Undo"),
+        ("U", "redo", "Redo"),
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
         ("g", "register", "Register"),
@@ -109,8 +168,8 @@ class BeancountTUI(App):
         self.show_directives: bool = False
         self._watch_interval = watch_interval
         self._watched_mtimes = self.ledger.file_mtimes()
-        # Single-level undo: the affected file and its content before the last write.
-        self._undo: tuple[Path, str] | None = None
+        # Bounded, chronological undo/redo history across every file touched.
+        self._undo_manager = UndoManager()
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -219,19 +278,33 @@ class BeancountTUI(App):
 
     def _snapshot_for_undo(self, path: str | Path) -> None:
         path = Path(path)
-        self._undo = (path, path.read_text(encoding="utf-8"))
+        self._undo_manager.record(path, path.read_text(encoding="utf-8"))
 
     def action_undo(self) -> None:
-        if self._undo is None:
+        entry = self._undo_manager.pop_undo()
+        if entry is None:
             self.notify("Nothing to undo.", severity="warning")
             return
-        path, content = self._undo
+        path, content = entry
+        self._undo_manager.push_redo(path, path.read_text(encoding="utf-8"))
         path.write_text(content, encoding="utf-8")
-        self._undo = None
         self.ledger.reload()
         self._watched_mtimes = self.ledger.file_mtimes()
         self.refresh_views()
         self.notify(f"Undid last change to {path.name}.")
+
+    def action_redo(self) -> None:
+        entry = self._undo_manager.pop_redo()
+        if entry is None:
+            self.notify("Nothing to redo.", severity="warning")
+            return
+        path, content = entry
+        self._undo_manager.push_undo(path, path.read_text(encoding="utf-8"))
+        path.write_text(content, encoding="utf-8")
+        self.ledger.reload()
+        self._watched_mtimes = self.ledger.file_mtimes()
+        self.refresh_views()
+        self.notify(f"Redid last change to {path.name}.")
 
     def action_reload(self) -> None:
         self.ledger.reload()
