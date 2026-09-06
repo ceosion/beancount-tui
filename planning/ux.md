@@ -45,7 +45,7 @@ toggling ascending/descending on repeat.
 
 ### UX-03: Transaction/directive detail panel
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -55,18 +55,18 @@ shows the full source text of the currently selected entry via the existing
 `editor.format_entry`, updating as the cursor moves.
 
 **Acceptance criteria:**
-- [ ] Selecting a row updates the detail panel with that entry's full
+- [x] Selecting a row updates the detail panel with that entry's full
       formatted source text.
-- [ ] Panel is togglable (doesn't have to always be visible, to preserve
+- [x] Panel is togglable (doesn't have to always be visible, to preserve
       table space on small terminals).
-- [ ] Test covering the panel content matches `format_entry` output for a
+- [x] Test covering the panel content matches `format_entry` output for a
       selected entry.
 
 ---
 
 ### UX-04: Row polish for new directive types
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-02, LANG-03, LANG-04, LANG-05, LANG-06, LANG-07
 - **Effort:** 1h
 
@@ -77,7 +77,15 @@ a mixed-directive table (with `t` toggled on) stays scannable rather than
 reading as a wall of similar rows.
 
 **Acceptance criteria:**
-- [ ] Each directive type has a visually distinct keyword marker (color or
+- [x] Each directive type has a visually distinct keyword marker (color or
       style) in the table.
-- [ ] Verified visually by running the app against a ledger containing every
-      directive type at once.
+- [x] Verified visually by running the app against a ledger containing every
+      directive type at once. (No interactive terminal was available in this
+      environment, so this was verified programmatically instead: an
+      automated test loads a ledger containing one of every directive type
+      through the real Beancount parser, runs each entry through the same
+      `_entry_row` function `TransactionTable` uses, and asserts every
+      directive keyword renders as a `rich.text.Text` cell with a style
+      unique to its directive type, distinct from a Transaction's plain,
+      unstyled flag cell.)
+
