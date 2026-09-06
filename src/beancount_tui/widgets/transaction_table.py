@@ -11,7 +11,7 @@ from pathlib import Path
 from beancount.core import data
 from textual.widgets import DataTable
 
-from beancount_tui.ledger import transaction_amount
+from beancount_tui.ledger import has_user_metadata, transaction_amount
 
 
 class TransactionTable(DataTable):
@@ -49,7 +49,10 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
     """
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
-        return (date, entry.flag or "*", entry.payee or "", entry.narration or "",
+        narration = entry.narration or ""
+        if has_user_metadata(entry):
+            narration = f"{narration} +".strip()
+        return (date, entry.flag or "*", entry.payee or "", narration,
                 transaction_amount(entry))
     if isinstance(entry, data.Open):
         return (date, "open", "", entry.account, ", ".join(entry.currencies or []))

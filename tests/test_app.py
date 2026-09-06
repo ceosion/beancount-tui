@@ -226,6 +226,29 @@ async def test_filter_via_filter_bar(ledger_path):
         assert not bar.has_class("visible")
 
 
+async def test_filter_by_metadata_value(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Widget Co" "Gadget purchase"\n'
+        '  invoice-ref: "zephyrinvoice"\n'
+        "  Assets:Checking  -15.00 USD\n"
+        "  Expenses:Food:Groceries  15.00 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        await pilot.press(*"zephyrinvoice")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Widget Co"
+        # The narration cell surfaces a marker for the extra metadata.
+        row = _entry_row(table.shown[0])
+        assert row[3].endswith("+")
+
+
 async def test_filter_combines_with_account_selection(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

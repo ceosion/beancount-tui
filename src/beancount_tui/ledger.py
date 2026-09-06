@@ -194,12 +194,40 @@ def filter_transactions(
     return [txn for txn in transactions if needle in _entry_search_text(txn).lower()]
 
 
+_META_KEYS_EXCLUDED = ("filename", "lineno")
+
+
+def _user_meta_values(meta: dict | None) -> list[str]:
+    """Values of user-added metadata keys, excluding parser-added ones.
+
+    Every entry's ``meta`` dict always carries ``filename``/``lineno`` from
+    the parser; those aren't user metadata.
+    """
+    if not meta:
+        return []
+    return [str(v) for k, v in meta.items() if k not in _META_KEYS_EXCLUDED]
+
+
+def has_user_metadata(entry: data.Directive) -> bool:
+    """Whether ``entry`` (or, for transactions, any of its postings) carries
+    user-added metadata beyond the standard filename/lineno fields."""
+    if _user_meta_values(entry.meta):
+        return True
+    if isinstance(entry, data.Transaction):
+        return any(_user_meta_values(posting.meta) for posting in entry.postings)
+    return False
+
+
 def _entry_search_text(entry: data.Directive) -> str:
     if isinstance(entry, data.Transaction):
-        return f"{entry.payee or ''} {entry.narration or ''}"
+        parts = [entry.payee or "", entry.narration or "", *_user_meta_values(entry.meta)]
+        for posting in entry.postings:
+            parts.extend(_user_meta_values(posting.meta))
+        return " ".join(parts)
     parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
     if isinstance(entry, data.Note):
         parts.append(entry.comment)
+    parts.extend(_user_meta_values(entry.meta))
     return " ".join(parts)
 
 
