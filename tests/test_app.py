@@ -109,6 +109,94 @@ async def test_edit_preserves_pending_flag(ledger_path):
     assert ledger.transactions[-1].narration == "Awaiting confirmation (edited)"
 
 
+async def test_new_transaction_with_tags_links_via_form(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        form.query_one("#tags_links").value = "#vacation ^receipt-123"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+        )
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.narration == "Coffee"
+    assert txn.tags == frozenset({"vacation"})
+    assert txn.links == frozenset({"receipt-123"})
+
+
+async def test_edit_transaction_tags_links_via_form(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Corner Cafe" "Coffee" #vacation ^receipt-123\n'
+        "  Expenses:Food:Restaurant  4.50 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=table.row_count - 1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#tags_links").value == "#vacation ^receipt-123"
+
+        form.query_one("#tags_links").value = "#work"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.tags == frozenset({"work"})
+    assert txn.links == frozenset()
+
+
+async def test_filter_by_tag(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Corner Cafe" "Coffee" #vacation\n'
+        "  Expenses:Food:Restaurant  4.50 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.press(*"vacation")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 1
+        assert table.shown[0].payee == "Corner Cafe"
+
+
+def test_entry_row_shows_tags_and_links():
+    txn = data.Transaction(
+        meta={},
+        date=datetime.date(2026, 1, 16),
+        flag="*",
+        payee="Corner Cafe",
+        narration="Coffee",
+        tags=frozenset({"vacation"}),
+        links=frozenset({"receipt-123"}),
+        postings=[],
+    )
+    row = _entry_row(txn)
+    assert row[3] == "Coffee #vacation ^receipt-123"
+
+
 async def test_delete_transaction_with_confirmation(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

@@ -223,6 +223,10 @@ def _entry_search_text(entry: data.Directive) -> str:
         parts = [entry.payee or "", entry.narration or "", *_user_meta_values(entry.meta)]
         for posting in entry.postings:
             parts.extend(_user_meta_values(posting.meta))
+        if entry.tags:
+            parts.extend(sorted(entry.tags))
+        if entry.links:
+            parts.extend(sorted(entry.links))
         return " ".join(parts)
     parts = [type(entry).__name__.lower(), *sorted(getters.get_entry_accounts(entry))]
     if isinstance(entry, data.Note):

@@ -164,7 +164,7 @@ the ledger, e.g. `2026-09-06 query "cash" "SELECT ..."`). Display only here
 
 ### LANG-08: Tags and links
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -178,11 +178,11 @@ show them in the table (append to the narration cell or add a column), and
 make `filter_transactions` match against them.
 
 **Acceptance criteria:**
-- [ ] Form has a tags/links field; round-trips correctly on create and edit
+- [x] Form has a tags/links field; round-trips correctly on create and edit
       (pre-filled from `entry.tags`/`entry.links` when editing).
-- [ ] Table shows tags/links for transactions that have them.
-- [ ] Text filter matches on tag/link content.
-- [ ] Tests: create with tags+links, edit to change them, filter by tag.
+- [x] Table shows tags/links for transactions that have them.
+- [x] Text filter matches on tag/link content.
+- [x] Tests: create with tags+links, edit to change them, filter by tag.
 
 ---
 

@@ -50,6 +50,9 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
     date = str(entry.date)
     if isinstance(entry, data.Transaction):
         narration = entry.narration or ""
+        tags_links = _tags_links_summary(entry)
+        if tags_links:
+            narration = f"{narration} {tags_links}".strip()
         if has_user_metadata(entry):
             narration = f"{narration} +".strip()
         return (date, entry.flag or "*", entry.payee or "", narration,
@@ -87,3 +90,10 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
             summary = f"! {summary}"
         return (date, "document", "", summary, "")
     return (date, type(entry).__name__.lower(), "", "", "")
+
+
+def _tags_links_summary(entry: data.Transaction) -> str:
+    """Render a transaction's tags/links as ``#tag ^link`` text for display."""
+    tokens = [f"#{tag}" for tag in sorted(entry.tags or ())]
+    tokens += [f"^{link}" for link in sorted(entry.links or ())]
+    return " ".join(tokens)

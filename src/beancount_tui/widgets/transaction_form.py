@@ -73,6 +73,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         flag: str = "*",
         payee: str = "",
         narration: str = "",
+        tags_links: str = "",
         postings_text: str = "",
         title: str = "New transaction",
         files: list[Path] | None = None,
@@ -84,6 +85,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         self._flag = flag
         self._payee = payee
         self._narration = narration
+        self._tags_links = tags_links
         self._postings_text = postings_text
         self._title = title
         # Offer a target-file picker only when there is a real choice.
@@ -100,6 +102,8 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield Input(value=self._payee, id="payee", placeholder="(optional)")
             yield Label("Narration", classes="field-label")
             yield Input(value=self._narration, id="narration")
+            yield Label("Tags / links (e.g. #vacation ^receipt-123)", classes="field-label")
+            yield Input(value=self._tags_links, id="tags_links", placeholder="(optional)")
             yield Label(
                 "Postings (one per line: ACCOUNT  AMOUNT CURRENCY; Tab completes accounts)",
                 classes="field-label",
@@ -123,10 +127,13 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         flag = self.query_one("#flag", Input).value.strip() or "*"
         payee = self.query_one("#payee", Input).value.strip()
         narration = self.query_one("#narration", Input).value.strip()
+        tags_links = self.query_one("#tags_links", Input).value.strip()
         postings = self.query_one("#postings", TextArea).text
 
         quoted_payee = f' "{payee}"' if payee else ""
         header = f'{date} {flag}{quoted_payee} "{narration}"'
+        if tags_links:
+            header += f" {tags_links}"
         body = "\n".join(
             "  " + line.strip() for line in postings.splitlines() if line.strip()
         )

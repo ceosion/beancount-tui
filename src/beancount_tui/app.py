@@ -325,6 +325,13 @@ def _postings_text(txn: data.Transaction) -> str:
     return "\n".join(line.strip() for line in lines[1:])
 
 
+def _tags_links_text(txn: data.Transaction) -> str:
+    """Render a transaction's tags/links as ``#tag ^link`` text for the form."""
+    tokens = [f"#{tag}" for tag in sorted(txn.tags or ())]
+    tokens += [f"^{link}" for link in sorted(txn.links or ())]
+    return " ".join(tokens)
+
+
 def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
     """Build a form pre-filled from an existing transaction."""
     return TransactionForm(
@@ -332,6 +339,7 @@ def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
         flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
+        tags_links=_tags_links_text(txn),
         postings_text=_postings_text(txn),
         title="Edit transaction",
         accounts=accounts,
@@ -346,6 +354,7 @@ def _duplicate_form(
         flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
+        tags_links=_tags_links_text(txn),
         postings_text=_postings_text(txn),
         title="Duplicate transaction",
         files=files,
