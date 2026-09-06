@@ -234,7 +234,7 @@ summary instead of the bare commodity count.
 
 ### LANG-11: Ledger info screen
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -247,8 +247,8 @@ the list of source files (`Ledger.files`, already computed). Pull all of
 this from `Ledger.options`.
 
 **Acceptance criteria:**
-- [ ] New screen/binding shows title, operating currencies, default booking
+- [x] New screen/binding shows title, operating currencies, default booking
       method, and account-name overrides when present.
-- [ ] Shows the full list of source files (top-level + includes).
-- [ ] Gracefully handles ledgers that don't set any of these (defaults only).
-- [ ] Test covering the screen against the example ledger's options.
+- [x] Shows the full list of source files (top-level + includes).
+- [x] Gracefully handles ledgers that don't set any of these (defaults only).
+- [x] Test covering the screen against the example ledger's options.
