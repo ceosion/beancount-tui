@@ -1,0 +1,2 @@
+This file stands in for a real bank export. SampleImporter.identify() only
+checks the filename, so the content here is irrelevant.

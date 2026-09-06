@@ -18,6 +18,7 @@ from beancount_tui.importer import ImportCandidate
 from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
+from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -158,6 +159,7 @@ class BeancountTUI(App):
         ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
         ("m", "import_csv", "Import CSV"),
+        ("M", "import_beangulp", "Import (beangulp)"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
         ("q", "quit", "Quit"),
@@ -251,34 +253,39 @@ class BeancountTUI(App):
         self.push_screen(HelpScreen(self.BINDINGS))
 
     def action_import_csv(self) -> None:
-        def on_candidates(candidates: list[ImportCandidate] | None) -> None:
-            if candidates is None:
+        self.push_screen(ImportForm(), self._on_import_candidates)
+
+    def action_import_beangulp(self) -> None:
+        self.push_screen(BeangulpImportForm(), self._on_import_candidates)
+
+    def _on_import_candidates(self, candidates: list[ImportCandidate] | None) -> None:
+        """Shared continuation for both import entry points (CSV, IMP-04
+        beangulp): push the same review/dedup/append screen either produced."""
+        if candidates is None:
+            return
+
+        def on_review(texts: list[str] | None) -> None:
+            if texts is None:
                 return
+            if texts:
+                self._snapshot_for_undo(self.ledger.path)
+                for text in texts:
+                    append_entry(self.ledger.path, text)
+            self.action_reload()
+            skipped = len(candidates) - len(texts)
+            summary = f"Imported {len(texts)} transaction(s)."
+            if skipped:
+                summary += f" Skipped {skipped}."
+            self.notify(summary)
 
-            def on_review(texts: list[str] | None) -> None:
-                if texts is None:
-                    return
-                if texts:
-                    self._snapshot_for_undo(self.ledger.path)
-                    for text in texts:
-                        append_entry(self.ledger.path, text)
-                self.action_reload()
-                skipped = len(candidates) - len(texts)
-                summary = f"Imported {len(texts)} transaction(s)."
-                if skipped:
-                    summary += f" Skipped {skipped}."
-                self.notify(summary)
-
-            self.push_screen(
-                ImportReviewScreen(
-                    candidates,
-                    accounts=self.ledger.accounts,
-                    existing_transactions=self.ledger.transactions_for_account(None),
-                ),
-                on_review,
-            )
-
-        self.push_screen(ImportForm(), on_candidates)
+        self.push_screen(
+            ImportReviewScreen(
+                candidates,
+                accounts=self.ledger.accounts,
+                existing_transactions=self.ledger.transactions_for_account(None),
+            ),
+            on_review,
+        )
 
     def action_filter(self) -> None:
         bar = self.query_one(FilterBar)

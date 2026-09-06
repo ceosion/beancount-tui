@@ -72,7 +72,7 @@ entry").
 
 ### IMP-04: beangulp importer integration
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** IMP-02
 - **Effort:** 2h
 
@@ -83,10 +83,10 @@ candidate entries, then feed them into the same `IMP-02` preview/append
 flow (and `IMP-03` dedup) used for the built-in CSV path.
 
 **Acceptance criteria:**
-- [ ] User can specify a beangulp importer config/module and a file to
+- [x] User can specify a beangulp importer config/module and a file to
       import.
-- [ ] The importer's extracted entries flow through the same preview,
+- [x] The importer's extracted entries flow through the same preview,
       dedup, and append path as CSV import.
-- [ ] A config/module that fails to load or has no matching importer
+- [x] A config/module that fails to load or has no matching importer
       produces a clear error, not a crash.
-- [ ] Test covering a minimal fixture beangulp importer end to end.
+- [x] Test covering a minimal fixture beangulp importer end to end.

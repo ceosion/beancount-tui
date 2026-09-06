@@ -46,6 +46,12 @@ class ImportCandidate:
     ``date``/``amount`` are ``None`` when the source cell failed to parse;
     the row is still returned, with ``error`` describing what went wrong,
     so the caller can show it to the user instead of silently dropping it.
+
+    ``transaction`` is set only by the beangulp import path (IMP-04): the
+    fully-formed ``data.Transaction`` beangulp's importer extracted, with
+    its real postings, payee, narration, tags and links already in place.
+    When present, the review screen renders it directly instead of
+    building the CSV path's single-posting-plus-placeholder shape.
     """
 
     date: datetime.date | None
@@ -55,6 +61,7 @@ class ImportCandidate:
     account: str
     row_number: int
     error: str | None = None
+    transaction: data.Transaction | None = None
 
 
 def preview_csv(path: Path, max_rows: int = 5) -> tuple[list[str], list[dict[str, str]]]:
