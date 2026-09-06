@@ -23,6 +23,7 @@ from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormRes
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
+from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
@@ -153,6 +154,7 @@ class BeancountTUI(App):
         ("b", "trial_balance", "Trial balance"),
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
+        ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
         ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
@@ -237,6 +239,9 @@ class BeancountTUI(App):
 
     def action_balance_sheet(self) -> None:
         self.push_screen(BalanceSheetScreen(self.ledger))
+
+    def action_holdings(self) -> None:
+        self.push_screen(HoldingsScreen(self.ledger))
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))

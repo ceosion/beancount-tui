@@ -93,7 +93,7 @@ sanity-check view.
 
 ### RPT-05: Holdings / net worth report
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-02, LANG-10
 - **Effort:** 2h
 
@@ -106,12 +106,12 @@ hence the dependency on `Price` directives being modeled (`LANG-02`) and
 cost-basis postings being handled correctly elsewhere (`LANG-10`).
 
 **Acceptance criteria:**
-- [ ] New screen lists holdings by commodity/account with quantity, cost
+- [x] New screen lists holdings by commodity/account with quantity, cost
       basis, and market value (when a price is available).
-- [ ] Shows a net-worth total in the operating currency, falling back
+- [x] Shows a net-worth total in the operating currency, falling back
       gracefully (e.g. "no price available") for commodities with no price
       history.
-- [ ] Test covering a ledger with at least one costed lot and a matching
+- [x] Test covering a ledger with at least one costed lot and a matching
       `price` directive.
 
 ---
