@@ -6,7 +6,7 @@ from pathlib import Path
 from beancount.core import data
 from textual.widgets import DataTable, OptionList, Select
 
-from beancount_tui.app import BeancountTUI
+from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
@@ -963,6 +963,177 @@ async def test_undo_restores_after_add(ledger_path):
         assert app.query_one(TransactionTable).row_count == 6
 
     assert ledger_path.read_text() == original
+
+
+def test_undo_manager_caps_history_length():
+    """Only the most recent `limit` writes are kept; older ones fall off."""
+    manager = UndoManager(limit=3)
+    for i in range(5):
+        manager.record(Path(f"file{i}.beancount"), f"content-{i}")
+
+    popped = []
+    while manager.can_undo():
+        popped.append(manager.pop_undo())
+
+    # Most-recent-first (LIFO), and only the last 3 records survived.
+    assert [content for _, content in popped] == [
+        "content-4",
+        "content-3",
+        "content-2",
+    ]
+
+
+def test_undo_manager_redo_stack_also_capped():
+    manager = UndoManager(limit=2)
+    for i in range(4):
+        manager.push_redo(Path(f"file{i}.beancount"), f"content-{i}")
+
+    redone = []
+    while manager.can_redo():
+        redone.append(manager.pop_redo())
+    assert [content for _, content in redone] == ["content-3", "content-2"]
+
+
+async def test_undo_redo_across_three_sequential_edits(ledger_path):
+    """undo-undo-redo-redo across 3+ sequential edits to the same file."""
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        snapshots = [original]
+        for narration in ("Edit one", "Edit two", "Edit three"):
+            await pilot.press("n")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, TransactionForm)
+            form.query_one("#narration").value = narration
+            form.query_one("#postings").text = (
+                "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+            )
+            form._save()
+            await pilot.pause()
+            snapshots.append(ledger_path.read_text())
+
+        assert app.query_one(TransactionTable).row_count == 9
+
+        # Undo twice: back to after edit one.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 8
+        assert ledger_path.read_text() == snapshots[2]
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+        assert ledger_path.read_text() == snapshots[1]
+
+        # A third undo restores the pristine original.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+        assert ledger_path.read_text() == snapshots[0]
+
+        # Redo twice: forward through edit one, then edit two.
+        await pilot.press("U")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+        assert ledger_path.read_text() == snapshots[1]
+
+        await pilot.press("U")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 8
+        assert ledger_path.read_text() == snapshots[2]
+
+        # A new write clears the redo stack: no more redoing forward past
+        # this new edit, even though one logical redo (edit three) remained.
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        form.query_one("#narration").value = "Fresh edit after redo"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 9
+
+        await pilot.press("U")
+        await pilot.pause()
+        # Nothing to redo: row count unchanged.
+        assert app.query_one(TransactionTable).row_count == 9
+
+
+async def test_undo_redo_across_two_files_independent(multi_ledger_path):
+    """Undo/redo across writes to different files in a multi-file ledger."""
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    main_original = multi_ledger_path.read_text()
+    food_original = food.read_text()
+
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 2
+
+        # Write to the main file (default target).
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        form.query_one("#payee").value = "Main Payee"
+        form.query_one("#narration").value = "Main edit"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        main_after_edit = multi_ledger_path.read_text()
+        assert "Main edit" in main_after_edit
+        assert app.query_one(TransactionTable).row_count == 3
+
+        # Write to the included food file.
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        form.query_one("#payee").value = "Food Payee"
+        form.query_one("#narration").value = "Food edit"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  2.00 USD\nAssets:Checking"
+        )
+        form.query_one("#target-file", Select).value = str(food)
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+        food_after_edit = food.read_text()
+        assert "Food edit" in food_after_edit
+        assert app.query_one(TransactionTable).row_count == 4
+
+        # Undo restores the food file (most recent change) without touching
+        # the main file's edit.
+        await pilot.press("u")
+        await pilot.pause()
+        assert food.read_text() == food_original
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert app.query_one(TransactionTable).row_count == 3
+
+        # A second undo restores the main file, independently.
+        await pilot.press("u")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_original
+        assert food.read_text() == food_original
+        assert app.query_one(TransactionTable).row_count == 2
+
+        # Redo replays main, then food, each touching only its own file.
+        await pilot.press("U")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert food.read_text() == food_original
+        assert app.query_one(TransactionTable).row_count == 3
+
+        await pilot.press("U")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert food.read_text() == food_after_edit
+        assert app.query_one(TransactionTable).row_count == 4
 
 
 EXTERNAL_TXN = (
