@@ -108,7 +108,7 @@ event type, and description (e.g. `"location": "Paris"`).
 
 ### LANG-05: Document directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1.5h
 
@@ -118,10 +118,10 @@ flag it visually (e.g. a `!` marker or muted color) if it's missing, since a
 dangling `document` directive is a common ledger-hygiene issue.
 
 **Acceptance criteria:**
-- [ ] `Document` entries display with account and filename.
-- [ ] Missing referenced files are visually flagged in the row.
-- [ ] Creatable via the LANG-01 picker.
-- [ ] Test covering display, the missing-file flag, and round-trip creation.
+- [x] `Document` entries display with account and filename.
+- [x] Missing referenced files are visually flagged in the row.
+- [x] Creatable via the LANG-01 picker.
+- [x] Test covering display, the missing-file flag, and round-trip creation.
 
 ---
 

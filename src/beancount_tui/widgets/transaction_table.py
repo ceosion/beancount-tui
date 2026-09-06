@@ -6,6 +6,8 @@ account-level directives (open, close, balance, pad, note) as well.
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from beancount.core import data
 from textual.widgets import DataTable
 
@@ -60,4 +62,12 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         return (date, "pad", "", f"{entry.account} from {entry.source_account}", "")
     if isinstance(entry, data.Note):
         return (date, "note", "", f"{entry.account}: {entry.comment}", "")
+    if isinstance(entry, data.Document):
+        summary = f"{entry.account}: {entry.filename}"
+        # Beancount resolves ``filename`` to an absolute path (relative to the
+        # directory of the file that declared the directive) before this ever
+        # reaches us, so a plain existence check is all that's needed here.
+        if not Path(entry.filename).exists():
+            summary = f"! {summary}"
+        return (date, "document", "", summary, "")
     return (date, type(entry).__name__.lower(), "", "", "")

@@ -367,7 +367,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         assert isinstance(picker, DirectiveTypePicker)
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
-        assert ids == {"open", "close", "balance", "pad", "note"}
+        assert ids == {"open", "close", "balance", "pad", "note", "document"}
 
         await pilot.press("escape")
         await pilot.pause()
@@ -512,6 +512,66 @@ async def test_add_directive_into_included_file(multi_ledger_path):
     assert "Filed receipt" in food.read_text()
     assert "Filed receipt" not in multi_ledger_path.read_text()
     assert not Ledger.load(multi_ledger_path).errors
+
+
+def test_document_directive_row_flags_missing_file(tmp_path):
+    from beancount_tui.widgets.transaction_table import _entry_row
+
+    existing = tmp_path / "receipt.pdf"
+    existing.write_text("dummy", encoding="utf-8")
+    missing = tmp_path / "missing.pdf"
+    meta = {"filename": str(tmp_path / "ledger.beancount"), "lineno": 1}
+
+    present_entry = data.Document(
+        meta=meta,
+        date=datetime.date(2026, 1, 20),
+        account="Assets:Checking",
+        filename=str(existing),
+        tags=frozenset(),
+        links=frozenset(),
+    )
+    missing_entry = data.Document(
+        meta=meta,
+        date=datetime.date(2026, 1, 20),
+        account="Assets:Checking",
+        filename=str(missing),
+        tags=frozenset(),
+        links=frozenset(),
+    )
+
+    date, keyword, payee, summary, amount = _entry_row(present_entry)
+    assert date == "2026-01-20"
+    assert keyword == "document"
+    assert payee == ""
+    assert amount == ""
+    assert summary == f"Assets:Checking: {existing}"
+
+    _, _, _, missing_summary, _ = _entry_row(missing_entry)
+    assert missing_summary == f"! Assets:Checking: {missing}"
+
+
+async def test_add_document_directive(ledger_path):
+    receipt = ledger_path.parent / "receipt.pdf"
+    receipt.write_text("dummy", encoding="utf-8")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "document")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'document Assets:FIXME "path/to/file.pdf"' in form.query_one("#text").text
+
+        form.query_one("#text").text = f'2026-09-06 document Assets:Checking "{receipt}"'
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    documents = [e for e in ledger.entries if isinstance(e, data.Document)]
+    assert any(d.account == "Assets:Checking" and d.filename == str(receipt) for d in documents)
 
 
 async def test_delete_directive_with_confirmation(ledger_path):

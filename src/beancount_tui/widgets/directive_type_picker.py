@@ -15,6 +15,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("open", "Open — start using an account"),
     ("close", "Close — stop using an account"),
     ("pad", "Pad — auto-balance from another account"),
+    ("document", "Document — attach a file to an account"),
 )
 
 
