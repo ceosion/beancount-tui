@@ -28,7 +28,7 @@ redo alongside the existing `u` for undo.
 
 ### EDIT-02: Balance-assertion helper
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -40,20 +40,20 @@ dated today. This is the fastest way to checkpoint an account right after
 reconciling it against a statement.
 
 **Acceptance criteria:**
-- [ ] Binding available when an account is selected in the sidebar.
-- [ ] Pre-filled directive shows the account's current computed balance for
+- [x] Binding available when an account is selected in the sidebar.
+- [x] Pre-filled directive shows the account's current computed balance for
       each currency it holds (one directive per currency if it holds more
       than one).
-- [ ] Saving appends and the ledger still validates (no self-inflicted
+- [x] Saving appends and the ledger still validates (no self-inflicted
       assertion failure from a stale computed value).
-- [ ] Test covering the pre-filled amount matches the account's realized
+- [x] Test covering the pre-filled amount matches the account's realized
       balance.
 
 ---
 
 ### EDIT-03: Multi-currency valuation display
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -66,13 +66,13 @@ to convert. Show "no price available" rather than silently omitting a
 currency that can't be converted.
 
 **Acceptance criteria:**
-- [ ] Sidebar/account balances show a converted total in the operating
+- [x] Sidebar/account balances show a converted total in the operating
       currency alongside native amounts, when at least one operating
       currency is configured and prices are available.
-- [ ] Currencies with no known price are called out rather than silently
+- [x] Currencies with no known price are called out rather than silently
       dropped from the total.
-- [ ] No operating currency configured → unchanged current behavior.
-- [ ] Test covering conversion math against a small ledger with known
+- [x] No operating currency configured → unchanged current behavior.
+- [x] Test covering conversion math against a small ledger with known
       prices.
 
 ---

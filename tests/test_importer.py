@@ -4,7 +4,14 @@ import datetime
 from decimal import Decimal
 from pathlib import Path
 
-from beancount_tui.importer import CsvColumnMapping, parse_csv, preview_csv
+from beancount_tui.importer import (
+    CsvColumnMapping,
+    ImportCandidate,
+    find_duplicate_reason,
+    parse_csv,
+    preview_csv,
+)
+from beancount_tui.ledger import Ledger
 
 FIXTURE = Path(__file__).parent / "fixtures" / "sample_import.csv"
 
@@ -61,3 +68,65 @@ def test_parse_csv_without_payee_or_narration_mapping():
     mapping = CsvColumnMapping(date="Date", amount="Amount")
     candidates = parse_csv(FIXTURE, mapping, account="Assets:Checking")
     assert all(c.payee == "" and c.narration == "" for c in candidates)
+
+
+def test_find_duplicate_reason_matches_existing_fixture_entry(ledger_path):
+    """The fixture CSV's Green Grocer row (2026-01-06, -87.35, Assets:Checking)
+    matches an entry already present in the example ledger — same date, same
+    amount posted to the same account — so it should be flagged as a likely
+    duplicate, with a human-readable reason naming the existing entry."""
+    ledger = Ledger.load(ledger_path)
+    existing = ledger.transactions_for_account(None)
+
+    candidates = parse_csv(FIXTURE, MAPPING, account="Assets:Checking")
+    green_grocer = candidates[1]
+    assert green_grocer.date == datetime.date(2026, 1, 6)
+    assert green_grocer.amount == Decimal("-87.35")
+
+    reason = find_duplicate_reason(green_grocer, existing)
+    assert reason is not None
+    assert "2026-01-06" in reason
+    assert "Weekly groceries" in reason
+
+
+def test_find_duplicate_reason_no_match_for_different_amount(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    existing = ledger.transactions_for_account(None)
+
+    candidate = ImportCandidate(
+        date=datetime.date(2026, 1, 6),
+        amount=Decimal("-99.99"),
+        payee="Green Grocer",
+        narration="Weekly groceries",
+        account="Assets:Checking",
+        row_number=1,
+    )
+    assert find_duplicate_reason(candidate, existing) is None
+
+
+def test_find_duplicate_reason_no_match_for_different_account(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    existing = ledger.transactions_for_account(None)
+
+    candidate = ImportCandidate(
+        date=datetime.date(2026, 1, 6),
+        amount=Decimal("-87.35"),
+        payee="Green Grocer",
+        narration="Weekly groceries",
+        account="Assets:Savings",
+        row_number=1,
+    )
+    assert find_duplicate_reason(candidate, existing) is None
+
+
+def test_find_duplicate_reason_none_without_parsed_date_or_amount():
+    incomplete = ImportCandidate(
+        date=None,
+        amount=Decimal("-87.35"),
+        payee="",
+        narration="",
+        account="Assets:Checking",
+        row_number=1,
+        error="invalid date",
+    )
+    assert find_duplicate_reason(incomplete, []) is None

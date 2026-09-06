@@ -8,7 +8,7 @@ from decimal import Decimal
 from pathlib import Path
 
 from beancount import loader
-from beancount.core import data, getters, realization
+from beancount.core import data, getters, prices, realization
 from beancount.core.inventory import Inventory
 
 
@@ -83,6 +83,47 @@ class BalanceSheet:
 
 
 @dataclass
+class Holding:
+    """One account's aggregated position in a single commodity, at cost.
+
+    ``cost_basis`` sums each contributing posting's ``quantity * cost.number``
+    as an ``Inventory`` (rather than a bare ``Decimal``) so lots opened in
+    different cost currencies don't get mixed.
+
+    ``market_value`` is the latest known price (see
+    ``Ledger.holdings``/``build_price_map``) times ``quantity``, preferring a
+    direct quote in the operating currency; if none exists but the cost
+    currency has one, that's used instead (``priced_in_operating_currency`` is
+    ``False`` in that case, so it's clear the amount isn't in the ledger's
+    operating currency). ``None`` when no price is known in either currency —
+    "no price available" rather than a crash.
+    """
+
+    account: str
+    commodity: str
+    quantity: Decimal
+    cost_basis: Inventory
+    market_value: data.Amount | None
+    priced_in_operating_currency: bool
+
+
+@dataclass
+class HoldingsReport:
+    """Per-commodity/account holdings plus a net-worth total.
+
+    ``net_worth`` only includes holdings whose ``market_value`` is expressed
+    in the operating currency — the "converted to the operating currency
+    where prices allow" part of the report; holdings with no price, or with
+    a price only in their cost currency, are shown individually but excluded
+    from the total rather than silently mis-converted.
+    """
+
+    holdings: list[Holding]
+    net_worth: Inventory
+    operating_currency: str | None
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -94,6 +135,8 @@ class Ledger:
     entries: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     options: dict = field(default_factory=dict)
+    # Lazily built and cached; invalidated on reload. Not part of equality.
+    _price_map: object = field(default=None, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: str | Path) -> "Ledger":
@@ -103,6 +146,7 @@ class Ledger:
 
     def reload(self) -> None:
         self.entries, self.errors, self.options = loader.load_file(str(self.path))
+        self._price_map = None
 
     @property
     def transactions(self) -> list[data.Transaction]:
@@ -266,6 +310,94 @@ class Ledger:
             net_income=net_income,
         )
 
+    def holdings(self, as_of: datetime.date | None = None) -> HoldingsReport:
+        """Aggregate costed lots in Assets/Liabilities into per-commodity holdings.
+
+        Groups every costed posting (``Posting.cost`` is not ``None``) dated
+        on or before ``as_of`` (default: today) by ``(account, commodity)`` —
+        grouping by ``units.currency``, not by cost currency, per
+        ``Holding``'s docstring. Postings without a cost (plain currency
+        holdings, e.g. a checking account balance) aren't lots and are out of
+        scope for this report.
+
+        Market value uses ``beancount.core.prices.build_price_map`` over all
+        ``Price`` directives (plus the inverses it derives for free), looked
+        up as of ``as_of``: first a direct commodity-to-operating-currency
+        quote, falling back to a commodity-to-cost-currency quote if that's
+        all that's known. No further chaining (e.g. cost-currency into
+        operating-currency) is attempted, so a holding can end up with a
+        market value that isn't in the operating currency — see
+        ``Holding.priced_in_operating_currency``.
+        """
+        if as_of is None:
+            as_of = datetime.date.today()
+        name_assets = self.options.get("name_assets", "Assets")
+        name_liabilities = self.options.get("name_liabilities", "Liabilities")
+        operating_currencies = self.options.get("operating_currency") or []
+        operating_currency = operating_currencies[0] if operating_currencies else None
+
+        price_map = prices.build_price_map(self.entries)
+
+        per_key: dict[tuple[str, str], dict] = {}
+        for txn in self.transactions:
+            if txn.date > as_of:
+                continue
+            for posting in txn.postings:
+                root = posting.account.split(":", 1)[0]
+                if root not in (name_assets, name_liabilities):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                if posting.cost is None or posting.cost.number is None:
+                    continue
+                key = (posting.account, posting.units.currency)
+                agg = per_key.setdefault(key, {"quantity": Decimal(0), "cost_basis": Inventory()})
+                agg["quantity"] += posting.units.number
+                agg["cost_basis"].add_amount(
+                    data.Amount(posting.units.number * posting.cost.number, posting.cost.currency)
+                )
+
+        holdings: list[Holding] = []
+        net_worth = Inventory()
+        for (account, commodity), agg in sorted(per_key.items()):
+            quantity: Decimal = agg["quantity"]
+            if quantity == Decimal(0):
+                continue
+            cost_basis: Inventory = agg["cost_basis"]
+
+            market_value: data.Amount | None = None
+            priced_in_operating_currency = False
+            if operating_currency is not None:
+                _, rate = prices.get_price(price_map, (commodity, operating_currency), as_of)
+                if rate is not None:
+                    market_value = data.Amount(quantity * rate, operating_currency)
+                    priced_in_operating_currency = True
+            if market_value is None:
+                cost_currency = next(
+                    (pos.units.currency for pos in cost_basis.get_positions()), None
+                )
+                if cost_currency is not None and cost_currency != operating_currency:
+                    _, rate = prices.get_price(price_map, (commodity, cost_currency), as_of)
+                    if rate is not None:
+                        market_value = data.Amount(quantity * rate, cost_currency)
+
+            holdings.append(
+                Holding(
+                    account=account,
+                    commodity=commodity,
+                    quantity=quantity,
+                    cost_basis=cost_basis,
+                    market_value=market_value,
+                    priced_in_operating_currency=priced_in_operating_currency,
+                )
+            )
+            if priced_in_operating_currency and market_value is not None:
+                net_worth.add_amount(market_value)
+
+        return HoldingsReport(
+            holdings=holdings, net_worth=net_worth, operating_currency=operating_currency
+        )
+
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""
         mtimes = {}
@@ -322,6 +454,59 @@ class Ledger:
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""
         return realization.realize(self.entries)
+
+    def _price_map_cached(self):
+        """The ledger's price map (from ``Price`` directives), built once and
+        cached until the next :meth:`reload`."""
+        if self._price_map is None:
+            self._price_map = prices.build_price_map(self.entries)
+        return self._price_map
+
+    def converted_total(self, inventory: Inventory) -> tuple[Decimal | None, list[str]]:
+        """Convert ``inventory`` to the ledger's primary operating currency.
+
+        The "primary" operating currency is the first entry of
+        ``options["operating_currency"]`` (that list's order is the
+        ledger's own priority ordering; multiple operating currencies aren't
+        otherwise handled here). Conversion rates come from
+        ``beancount.core.prices.build_price_map`` over all of the ledger's
+        ``Price`` directives, using the latest available price for each
+        currency (no as-of date).
+
+        Returns ``(total, unpriced)``: ``total`` is the summed value in the
+        operating currency, or ``None`` if no operating currency is
+        configured or none of the inventory's currencies could be valued at
+        all. ``unpriced`` lists (in currency order) any currencies that
+        couldn't be converted — these are excluded from ``total`` rather
+        than silently included as zero.
+        """
+        operating_currencies = self.options.get("operating_currency") or []
+        if not operating_currencies:
+            return None, []
+        target = operating_currencies[0]
+        price_map = self._price_map_cached()
+        positions = sorted(inventory.get_positions(), key=lambda pos: pos.units.currency)
+        total = Decimal(0)
+        unpriced: list[str] = []
+        found_any = False
+        for pos in positions:
+            currency = pos.units.currency
+            number = pos.units.number
+            if number is None:
+                continue
+            if currency == target:
+                total += number
+                found_any = True
+                continue
+            _, rate = prices.get_price(price_map, (currency, target))
+            if rate is None:
+                unpriced.append(currency)
+                continue
+            total += number * rate
+            found_any = True
+        if not found_any:
+            return None, unpriced
+        return total, unpriced
 
 
 def filter_transactions(

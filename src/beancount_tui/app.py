@@ -8,7 +8,7 @@ import sys
 from collections import deque
 from pathlib import Path
 
-from beancount.core import data, getters
+from beancount.core import data, getters, realization
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
@@ -23,6 +23,7 @@ from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormRes
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
+from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
@@ -151,8 +152,10 @@ class BeancountTUI(App):
         ("U", "redo", "Redo"),
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
+        ("B", "balance_directive", "Balance now"),
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
+        ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
         ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
@@ -197,7 +200,7 @@ class BeancountTUI(App):
         return filter_transactions(entries, self.filter_query)
 
     def refresh_views(self) -> None:
-        self.query_one(AccountTree).update_accounts(self.ledger.root_account())
+        self.query_one(AccountTree).update_accounts(self.ledger.root_account(), self.ledger)
         self.query_one(TransactionTable).update_entries(self._visible_entries())
         error_panel = self.query_one("#errors", Static)
         if self.ledger.errors:
@@ -238,6 +241,9 @@ class BeancountTUI(App):
     def action_balance_sheet(self) -> None:
         self.push_screen(BalanceSheetScreen(self.ledger))
 
+    def action_holdings(self) -> None:
+        self.push_screen(HoldingsScreen(self.ledger))
+
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))
 
@@ -264,7 +270,12 @@ class BeancountTUI(App):
                 self.notify(summary)
 
             self.push_screen(
-                ImportReviewScreen(candidates, accounts=self.ledger.accounts), on_review
+                ImportReviewScreen(
+                    candidates,
+                    accounts=self.ledger.accounts,
+                    existing_transactions=self.ledger.transactions_for_account(None),
+                ),
+                on_review,
             )
 
         self.push_screen(ImportForm(), on_candidates)
@@ -372,6 +383,57 @@ class BeancountTUI(App):
             )
 
         self.push_screen(DirectiveTypePicker(), on_type_chosen)
+
+    def action_balance_directive(self) -> None:
+        """Checkpoint the selected account: a `balance` directive for its
+        current computed balance, dated today, skipping straight to
+        `DirectiveForm` (no `DirectiveTypePicker` step).
+
+        An account holding more than one currency needs one `balance`
+        directive per currency (`parse_directive_text` only accepts exactly
+        one directive per save), so multi-currency accounts are handled by
+        chaining `DirectiveForm` screens, one per currency, in sequence.
+        """
+        if self.selected_account is None:
+            self.notify("No account selected.", severity="warning")
+            return
+        account = self.selected_account
+        node = realization.get(self.ledger.root_account(), account)
+        if node is None:
+            self.notify("No account selected.", severity="warning")
+            return
+        balance = realization.compute_balance(node).reduce(lambda pos: pos.units)
+        positions = sorted(balance.get_positions(), key=lambda pos: pos.units.currency)
+        date = datetime.date.today().isoformat()
+        if positions:
+            texts = [
+                f"{date} balance {account}  {pos.units.number} {pos.units.currency}"
+                for pos in positions
+            ]
+        else:
+            currency = (self.ledger.options.get("operating_currency") or ["USD"])[0]
+            texts = [f"{date} balance {account}  0.00 {currency}"]
+
+        def push_form(index: int) -> None:
+            def on_form_result(result: DirectiveFormResult | None) -> None:
+                if result is None:
+                    return
+                target = result.filename or self.ledger.path
+                self._snapshot_for_undo(target)
+                append_entry(target, result.text)
+                self.action_reload()
+                if index + 1 < len(texts):
+                    push_form(index + 1)
+
+            title = "New balance directive"
+            if len(texts) > 1:
+                title += f" ({index + 1}/{len(texts)})"
+            self.push_screen(
+                DirectiveForm(texts[index], title=title, files=self.ledger.files),
+                on_form_result,
+            )
+
+        push_form(0)
 
     def action_edit_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry

@@ -1,5 +1,9 @@
 import datetime
 from decimal import Decimal
+from pathlib import Path
+
+import pytest
+from beancount.core import realization
 
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
@@ -290,6 +294,62 @@ def test_balance_sheet_as_of_excludes_later_postings(ledger_path):
     assert sheet.assets_total == sheet.liabilities_total + sheet.equity_total + sheet.net_income
 
 
+def test_holdings_aggregates_costed_lot_with_market_value(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n\n"
+        "2026-02-01 price HOOL  550.00 USD\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    report = ledger.holdings(as_of=datetime.date(2026, 2, 15))
+
+    assert len(report.holdings) == 1
+    holding = report.holdings[0]
+    assert holding.account == "Assets:Investments"
+    assert holding.commodity == "HOOL"
+    assert holding.quantity == Decimal("10")
+    assert format_inventory(holding.cost_basis) == "5,000.00 USD"
+    assert holding.priced_in_operating_currency is True
+    assert holding.market_value.number == Decimal("5500.00")
+    assert holding.market_value.currency == "USD"
+
+    assert report.operating_currency == "USD"
+    assert format_inventory(report.net_worth) == "5,500.00 USD"
+
+
+def test_holdings_before_price_directive_has_no_market_value(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n\n"
+        "2026-02-01 price HOOL  550.00 USD\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    # As of the purchase date, no price directive has posted yet.
+    report = ledger.holdings(as_of=datetime.date(2026, 1, 20))
+
+    assert len(report.holdings) == 1
+    holding = report.holdings[0]
+    assert holding.market_value is None
+    assert holding.priced_in_operating_currency is False
+    assert format_inventory(report.net_worth) == ""
+
+
+def test_holdings_excludes_uncosted_postings(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    report = ledger.holdings()
+    # The example ledger's Checking/Savings balances aren't held at cost.
+    assert report.holdings == []
+    assert format_inventory(report.net_worth) == ""
+
+
 def test_root_account_has_balances(ledger_path):
     ledger = Ledger.load(ledger_path)
     root = ledger.root_account()
@@ -328,6 +388,83 @@ def test_register_running_balance(ledger_path):
 def test_register_none_account_returns_empty(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert ledger.register("Assets:Nonexistent") == []
+
+
+@pytest.fixture
+def priced_ledger_path(tmp_path: Path) -> Path:
+    """A throwaway ledger with an operating currency and known prices.
+
+    ``Assets:Brokerage`` holds USD plus AAPL (priced), ``Assets:Crypto``
+    holds an unpriced currency (XYZ), and ``Assets:Cash`` holds only USD
+    (the operating currency itself, nothing to convert).
+    """
+    path = tmp_path / "priced.beancount"
+    path.write_text(
+        'option "title" "Priced Ledger"\n'
+        'option "operating_currency" "USD"\n'
+        "\n"
+        "2026-01-01 open Assets:Brokerage\n"
+        "2026-01-01 open Assets:Crypto\n"
+        "2026-01-01 open Assets:Cash\n"
+        "2026-01-01 open Equity:Opening-Balances\n"
+        "\n"
+        "2026-01-02 price AAPL 150.00 USD\n"
+        "2026-01-03 price AAPL 175.32 USD\n"
+        "\n"
+        '2026-01-01 * "Opening cash"\n'
+        "  Assets:Cash            1000.00 USD\n"
+        "  Equity:Opening-Balances\n"
+        "\n"
+        '2026-01-04 * "Buy stock, keep some cash"\n'
+        "  Assets:Brokerage       100.00 USD\n"
+        "  Assets:Brokerage       50 AAPL\n"
+        "  Equity:Opening-Balances  -100.00 USD\n"
+        "  Equity:Opening-Balances  -50 AAPL\n"
+        "\n"
+        '2026-01-05 * "Buy crypto"\n'
+        "  Assets:Crypto          10 XYZ\n"
+        "  Equity:Opening-Balances  -10 XYZ\n",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_converted_total_mixed_currencies_with_known_price(priced_ledger_path):
+    ledger = Ledger.load(priced_ledger_path)
+    assert not ledger.errors
+    root = ledger.root_account()
+    brokerage_balance = realization.compute_balance(root["Assets"]["Brokerage"]).reduce(
+        lambda pos: pos.units
+    )
+    total, unpriced = ledger.converted_total(brokerage_balance)
+    # 100.00 USD + 50 * 175.32 USD (the latest AAPL price) == 8,866.00 USD.
+    assert total == Decimal("8866.00")
+    assert unpriced == []
+
+
+def test_converted_total_reports_no_price_available(priced_ledger_path):
+    ledger = Ledger.load(priced_ledger_path)
+    root = ledger.root_account()
+    crypto_balance = realization.compute_balance(root["Assets"]["Crypto"]).reduce(
+        lambda pos: pos.units
+    )
+    total, unpriced = ledger.converted_total(crypto_balance)
+    assert total is None
+    assert unpriced == ["XYZ"]
+
+
+def test_converted_total_no_operating_currency_configured(ledger_path):
+    # examples/example.beancount configures "USD" as the operating currency;
+    # temporarily clear it to exercise the "not configured" branch.
+    ledger = Ledger.load(ledger_path)
+    ledger.options["operating_currency"] = []
+    root = ledger.root_account()
+    checking_balance = realization.compute_balance(root["Assets"]["Checking"]).reduce(
+        lambda pos: pos.units
+    )
+    total, unpriced = ledger.converted_total(checking_balance)
+    assert total is None
+    assert unpriced == []
 
 
 def test_register_multiple_currencies_kept_separate(tmp_path):
