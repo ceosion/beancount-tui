@@ -32,7 +32,7 @@ held in memory (not yet written anywhere — that's `IMP-02`).
 
 ### IMP-02: Import preview and selective append
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** IMP-01
 - **Effort:** 2h
 
@@ -43,10 +43,10 @@ before import, and then append every confirmed one via `append_transaction`
 to the appropriate target file.
 
 **Acceptance criteria:**
-- [ ] Review screen lists all candidates with a per-row toggle.
-- [ ] A candidate can be opened in `TransactionForm` for edits before import.
-- [ ] Confirming appends only the checked candidates and reloads the ledger.
-- [ ] Test covering partial selection (some appended, some skipped).
+- [x] Review screen lists all candidates with a per-row toggle.
+- [x] A candidate can be opened in `TransactionForm` for edits before import.
+- [x] Confirming appends only the checked candidates and reloads the ledger.
+- [x] Test covering partial selection (some appended, some skipped).
 
 ---
 

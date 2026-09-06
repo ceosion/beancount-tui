@@ -4,21 +4,24 @@ import datetime
 from pathlib import Path
 
 from beancount.core import data
-from textual.widgets import DataTable, OptionList, Select
+from textual.widgets import Checkbox, DataTable, OptionList, Select
 
-from beancount_tui.app import BeancountTUI
+from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
+from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.import_form import ImportForm
+from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
@@ -965,6 +968,177 @@ async def test_undo_restores_after_add(ledger_path):
     assert ledger_path.read_text() == original
 
 
+def test_undo_manager_caps_history_length():
+    """Only the most recent `limit` writes are kept; older ones fall off."""
+    manager = UndoManager(limit=3)
+    for i in range(5):
+        manager.record(Path(f"file{i}.beancount"), f"content-{i}")
+
+    popped = []
+    while manager.can_undo():
+        popped.append(manager.pop_undo())
+
+    # Most-recent-first (LIFO), and only the last 3 records survived.
+    assert [content for _, content in popped] == [
+        "content-4",
+        "content-3",
+        "content-2",
+    ]
+
+
+def test_undo_manager_redo_stack_also_capped():
+    manager = UndoManager(limit=2)
+    for i in range(4):
+        manager.push_redo(Path(f"file{i}.beancount"), f"content-{i}")
+
+    redone = []
+    while manager.can_redo():
+        redone.append(manager.pop_redo())
+    assert [content for _, content in redone] == ["content-3", "content-2"]
+
+
+async def test_undo_redo_across_three_sequential_edits(ledger_path):
+    """undo-undo-redo-redo across 3+ sequential edits to the same file."""
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        snapshots = [original]
+        for narration in ("Edit one", "Edit two", "Edit three"):
+            await pilot.press("n")
+            await pilot.pause()
+            form = app.screen
+            assert isinstance(form, TransactionForm)
+            form.query_one("#narration").value = narration
+            form.query_one("#postings").text = (
+                "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+            )
+            form._save()
+            await pilot.pause()
+            snapshots.append(ledger_path.read_text())
+
+        assert app.query_one(TransactionTable).row_count == 9
+
+        # Undo twice: back to after edit one.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 8
+        assert ledger_path.read_text() == snapshots[2]
+
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+        assert ledger_path.read_text() == snapshots[1]
+
+        # A third undo restores the pristine original.
+        await pilot.press("u")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 6
+        assert ledger_path.read_text() == snapshots[0]
+
+        # Redo twice: forward through edit one, then edit two.
+        await pilot.press("U")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 7
+        assert ledger_path.read_text() == snapshots[1]
+
+        await pilot.press("U")
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 8
+        assert ledger_path.read_text() == snapshots[2]
+
+        # A new write clears the redo stack: no more redoing forward past
+        # this new edit, even though one logical redo (edit three) remained.
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        form.query_one("#narration").value = "Fresh edit after redo"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 9
+
+        await pilot.press("U")
+        await pilot.pause()
+        # Nothing to redo: row count unchanged.
+        assert app.query_one(TransactionTable).row_count == 9
+
+
+async def test_undo_redo_across_two_files_independent(multi_ledger_path):
+    """Undo/redo across writes to different files in a multi-file ledger."""
+    food = (multi_ledger_path.parent / "food.beancount").resolve()
+    main_original = multi_ledger_path.read_text()
+    food_original = food.read_text()
+
+    app = BeancountTUI(multi_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.query_one(TransactionTable).row_count == 2
+
+        # Write to the main file (default target).
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        form.query_one("#payee").value = "Main Payee"
+        form.query_one("#narration").value = "Main edit"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  1.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+        main_after_edit = multi_ledger_path.read_text()
+        assert "Main edit" in main_after_edit
+        assert app.query_one(TransactionTable).row_count == 3
+
+        # Write to the included food file.
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        form.query_one("#payee").value = "Food Payee"
+        form.query_one("#narration").value = "Food edit"
+        form.query_one("#postings").text = (
+            "Expenses:Food:Groceries  2.00 USD\nAssets:Checking"
+        )
+        form.query_one("#target-file", Select).value = str(food)
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+        food_after_edit = food.read_text()
+        assert "Food edit" in food_after_edit
+        assert app.query_one(TransactionTable).row_count == 4
+
+        # Undo restores the food file (most recent change) without touching
+        # the main file's edit.
+        await pilot.press("u")
+        await pilot.pause()
+        assert food.read_text() == food_original
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert app.query_one(TransactionTable).row_count == 3
+
+        # A second undo restores the main file, independently.
+        await pilot.press("u")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_original
+        assert food.read_text() == food_original
+        assert app.query_one(TransactionTable).row_count == 2
+
+        # Redo replays main, then food, each touching only its own file.
+        await pilot.press("U")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert food.read_text() == food_original
+        assert app.query_one(TransactionTable).row_count == 3
+
+        await pilot.press("U")
+        await pilot.pause()
+        assert multi_ledger_path.read_text() == main_after_edit
+        assert food.read_text() == food_after_edit
+        assert app.query_one(TransactionTable).row_count == 4
+
+
 EXTERNAL_TXN = (
     '2026-01-21 * "External Editor" "Written outside the app"\n'
     "  Expenses:Food:Groceries  5.00 USD\n"
@@ -1075,6 +1249,85 @@ async def test_trial_balance_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, TrialBalanceScreen)
+
+
+async def test_register_screen(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.selected_account = "Assets:Checking"
+        await pilot.press("g")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, RegisterScreen)
+
+        table = screen.query_one("#report", DataTable)
+        rows = [
+            tuple(str(cell) for cell in table.get_row_at(i)) for i in range(table.row_count)
+        ]
+        assert rows[0] == ("2026-01-01", "Opening balance", "2,500.00 USD", "2,500.00 USD")
+        assert rows[-1] == (
+            "2026-01-15",
+            "Transfer to savings",
+            "-1,000.00 USD",
+            "4,098.45 USD",
+        )
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, RegisterScreen)
+
+
+async def test_register_requires_selected_account(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        assert app.selected_account is None
+        await pilot.press("g")
+        await pilot.pause()
+        assert not isinstance(app.screen, RegisterScreen)
+
+
+async def test_balance_sheet_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BalanceSheetScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        # As-of defaults to today, so the whole (Jan-2026-dated) example
+        # ledger is in scope.
+        assert any("Assets:Checking" in c for c in cells(0))
+        assert any("Equity:Opening-Balances" in c for c in cells(0))
+        assert "4,098.45 USD" in cells(1)
+        assert "5,098.45 USD" in cells(1)  # total assets
+        assert "2,598.45 USD" in cells(1)  # implicit net-income line
+        # total liabilities + equity (incl. net income) balances total assets
+        assert "5,098.45 USD" in cells(1)
+
+        # Narrowing the as-of date recomputes the report: only the opening
+        # balance and salary deposit have posted by 2026-01-05.
+        screen.query_one("#as-of", Input).value = "2026-01-05"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+        assert "4,200.00 USD" in cells(1)  # net income through 2026-01-05
+
+        # An invalid date shows an error and keeps the last report.
+        screen.query_one("#as-of", Input).value = "not-a-date"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BalanceSheetScreen)
 
 
 async def test_ledger_info_screen(ledger_path):
@@ -1205,7 +1458,7 @@ async def test_import_csv_via_form(ledger_path):
     assert len(ledger.transactions) == 6
 
 
-async def test_import_csv_binding_notifies_summary(ledger_path):
+async def test_import_csv_binding_opens_review_screen(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
         await pilot.pause()
@@ -1227,3 +1480,116 @@ async def test_import_csv_binding_notifies_summary(ledger_path):
         await pilot.pause()
 
         assert not isinstance(app.screen, ImportForm)
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+        assert len(review._rows) == 5
+
+        # Confirming with nothing changed still leaves the review screen and
+        # notifies with a count, exercising the full "m" -> review -> import path.
+        review._do_import()
+        await pilot.pause()
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+
+def _import_review_setup_and_parse(form) -> None:
+    form.query_one("#path").value = str(FIXTURE_CSV)
+    form._load_preview()
+    form.query_one("#col-date", Select).value = "Date"
+    form.query_one("#col-amount", Select).value = "Amount"
+    form.query_one("#col-payee", Select).value = "Merchant"
+    form.query_one("#col-narration", Select).value = "Description"
+    form.query_one("#account").value = "Assets:Checking"
+
+
+async def test_import_review_partial_selection(ledger_path):
+    """Uncheck one candidate before confirming: it's skipped, the rest are appended."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+        _import_review_setup_and_parse(form)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+        assert len(review._rows) == 5
+
+        # Rows 3/4 (bad date / bad amount) carry a parse error and default unchecked.
+        assert review._rows[0].checked is True  # Corner Cafe
+        assert review._rows[1].checked is True  # Green Grocer
+        assert review._rows[2].checked is False  # bad date row
+        assert review._rows[3].checked is False  # bad amount row
+        assert review._rows[4].checked is True  # Acme Corp paycheck
+
+        # Deselect the Corner Cafe row: it should be skipped, not appended.
+        review.query_one("#check-0", Checkbox).value = False
+        await pilot.pause()
+        assert review._rows[0].checked is False
+
+        review._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+    ledger = Ledger.load(ledger_path)
+    # Started with 6 transactions; Green Grocer + Acme Corp paycheck get appended,
+    # Corner Cafe (unchecked) and the two errored rows (default unchecked) do not.
+    assert len(ledger.transactions) == 8
+    narrations = {t.narration for t in ledger.transactions}
+    assert "Weekly groceries" in narrations
+    assert "Paycheck" in narrations
+    assert "Coffee and pastry" not in narrations
+    assert "Bad date row" not in narrations
+    assert "Bad amount row" not in narrations
+
+
+async def test_import_review_edit_before_import(ledger_path):
+    """A candidate can be opened in TransactionForm and edited before import."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("m")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, ImportForm)
+        _import_review_setup_and_parse(form)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+
+        # Edit the Corner Cafe row: replace the placeholder balancing account.
+        review._open_edit(0)
+        await pilot.pause()
+        edit_form = app.screen
+        assert isinstance(edit_form, TransactionForm)
+        postings = edit_form.query_one("#postings", PostingsArea)
+        assert "Expenses:FIXME" in postings.text
+        postings.text = postings.text.replace("Expenses:FIXME", "Expenses:Food:Restaurant")
+        edit_form._save()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, TransactionForm)
+        assert review._rows[0].edited is True
+        assert "Expenses:Food:Restaurant" in review._rows[0].text
+        assert review._rows[0].checked is True
+
+        review._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+    ledger = Ledger.load(ledger_path)
+    edited_txn = next(t for t in ledger.transactions if t.payee == "Corner Cafe")
+    accounts = {p.account for p in edited_txn.postings}
+    assert "Expenses:Food:Restaurant" in accounts
+    assert "Expenses:FIXME" not in accounts

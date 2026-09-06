@@ -10,7 +10,7 @@ widget.
 
 ### RPT-01: Balance sheet view
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -22,17 +22,17 @@ computed the same way `Ledger.income_statement` does) so the sheet balances
 even mid-year, before a bean-close would fold it into Equity.
 
 **Acceptance criteria:**
-- [ ] New screen shows Assets, Liabilities, Equity with per-account and
+- [x] New screen shows Assets, Liabilities, Equity with per-account and
       section totals as of a selectable date (default: today).
-- [ ] Includes a synthetic net-income line so total Assets = total
+- [x] Includes a synthetic net-income line so total Assets = total
       Liabilities + Equity (+ net income).
-- [ ] Test covering totals against a known example ledger state.
+- [x] Test covering totals against a known example ledger state.
 
 ---
 
 ### RPT-02: Register view with running balance
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -43,11 +43,11 @@ Can reuse `Ledger.transactions_for_account` and iterate summing posting
 units per currency.
 
 **Acceptance criteria:**
-- [ ] New screen/mode shows date, narration, posting amount, and running
+- [x] New screen/mode shows date, narration, posting amount, and running
       balance for the selected account's transactions, in date order.
-- [ ] Handles accounts with postings in more than one currency without
+- [x] Handles accounts with postings in more than one currency without
       mixing running totals across currencies.
-- [ ] Test covering running-balance correctness across a short known
+- [x] Test covering running-balance correctness across a short known
       sequence of transactions.
 
 ---

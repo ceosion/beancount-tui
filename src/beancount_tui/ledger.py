@@ -29,6 +29,22 @@ DISPLAYED_DIRECTIVES = (
 
 
 @dataclass
+class RegisterRow:
+    """One line of a register report: a transaction's effect on an account.
+
+    ``posting_amount`` is the sum of that transaction's posting(s) to the
+    account (or its sub-accounts) — usually one posting, but a transaction
+    could post to the account and a sub-account, or the account twice.
+    ``running_balance`` is the cumulative balance immediately after this row.
+    """
+
+    date: datetime.date
+    narration: str
+    posting_amount: Inventory
+    running_balance: Inventory
+
+
+@dataclass
 class IncomeStatement:
     """Per-account and total Income/Expenses balances over a period.
 
@@ -41,6 +57,29 @@ class IncomeStatement:
     income_total: Inventory
     expenses_total: Inventory
     net: Inventory
+
+
+@dataclass
+class BalanceSheet:
+    """Per-account and total Assets/Liabilities/Equity balances as of a date.
+
+    Assets amounts are as recorded (debit-normal: a positive balance for a
+    normal asset). Liabilities and Equity are sign-inverted so a normal
+    credit balance reads positive, the same convention ``IncomeStatement``
+    uses for Income. ``net_income`` is the current period's income minus
+    expenses (see ``Ledger.income_statement``), the implicit line a
+    bean-close would otherwise fold into Equity — include it so:
+
+        assets_total == liabilities_total + equity_total + net_income
+    """
+
+    assets: list[tuple[str, Inventory]]
+    liabilities: list[tuple[str, Inventory]]
+    equity: list[tuple[str, Inventory]]
+    assets_total: Inventory
+    liabilities_total: Inventory
+    equity_total: Inventory
+    net_income: Inventory
 
 
 @dataclass
@@ -165,6 +204,68 @@ class Ledger:
             if not balance.is_empty()
         ]
 
+    def balance_sheet(self, as_of: datetime.date | None = None) -> BalanceSheet:
+        """Summarize Assets/Liabilities/Equity postings as of ``as_of`` (default: today).
+
+        Sums every posting dated on or before ``as_of`` per account, the same
+        approach ``trial_balance`` uses across all five account types, but
+        restricted to Assets/Liabilities/Equity and split into those three
+        sections. Liabilities and Equity are sign-inverted to read as
+        positive credit-normal balances (like ``income_statement`` does for
+        Income), and the current period's net income (all transactions
+        through ``as_of``) is included as an implicit Equity-section line,
+        so ``assets_total == liabilities_total + equity_total + net_income``
+        even before a bean-close would fold it into Equity for real.
+        """
+        if as_of is None:
+            as_of = datetime.date.today()
+        name_assets = self.options.get("name_assets", "Assets")
+        name_liabilities = self.options.get("name_liabilities", "Liabilities")
+        name_equity = self.options.get("name_equity", "Equity")
+        per_account: dict[str, Inventory] = {}
+        for txn in self.transactions:
+            if txn.date > as_of:
+                continue
+            for posting in txn.postings:
+                root = posting.account.split(":", 1)[0]
+                if root not in (name_assets, name_liabilities, name_equity):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                per_account.setdefault(posting.account, Inventory()).add_amount(posting.units)
+
+        assets: list[tuple[str, Inventory]] = []
+        liabilities: list[tuple[str, Inventory]] = []
+        equity: list[tuple[str, Inventory]] = []
+        assets_total = Inventory()
+        liabilities_total = Inventory()
+        equity_total = Inventory()
+        for account in sorted(per_account):
+            balance = per_account[account]
+            if balance.is_empty():
+                continue
+            root = account.split(":", 1)[0]
+            if root == name_assets:
+                assets.append((account, balance))
+                assets_total.add_inventory(balance)
+            elif root == name_liabilities:
+                liabilities.append((account, -balance))
+                liabilities_total.add_inventory(-balance)
+            else:
+                equity.append((account, -balance))
+                equity_total.add_inventory(-balance)
+
+        net_income = self.income_statement(start=None, end=as_of).net
+        return BalanceSheet(
+            assets=assets,
+            liabilities=liabilities,
+            equity=equity,
+            assets_total=assets_total,
+            liabilities_total=liabilities_total,
+            equity_total=equity_total,
+            net_income=net_income,
+        )
+
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""
         mtimes = {}
@@ -185,6 +286,38 @@ class Ledger:
             for txn in self.transactions
             if any(p.account == account or p.account.startswith(prefix) for p in txn.postings)
         ]
+
+    def register(self, account: str) -> list[RegisterRow]:
+        """Per-transaction posting amount and running balance for ``account``.
+
+        Mirrors ``bean-report register ACCOUNT``: every transaction posting
+        to ``account`` or any of its sub-accounts, in date order, each with
+        that transaction's posting(s) to the account summed into a single
+        amount and the running balance immediately after. Multiple
+        currencies coexist in each ``Inventory`` without mixing.
+        """
+        prefix = account + ":"
+        txns = sorted(self.transactions_for_account(account), key=lambda txn: txn.date)
+        running = Inventory()
+        rows: list[RegisterRow] = []
+        for txn in txns:
+            posting_amount = Inventory()
+            for posting in txn.postings:
+                if posting.account != account and not posting.account.startswith(prefix):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                posting_amount.add_amount(posting.units)
+            running.add_inventory(posting_amount)
+            rows.append(
+                RegisterRow(
+                    date=txn.date,
+                    narration=txn.narration,
+                    posting_amount=posting_amount,
+                    running_balance=Inventory(running),
+                )
+            )
+        return rows
 
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar."""
