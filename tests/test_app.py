@@ -10,6 +10,7 @@ from beancount_tui.app import BeancountTUI
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import Ledger
 from beancount_tui.widgets.account_tree import AccountTree
+from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -1113,6 +1114,48 @@ async def test_register_requires_selected_account(ledger_path):
         await pilot.press("g")
         await pilot.pause()
         assert not isinstance(app.screen, RegisterScreen)
+
+
+async def test_balance_sheet_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BalanceSheetScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        # As-of defaults to today, so the whole (Jan-2026-dated) example
+        # ledger is in scope.
+        assert any("Assets:Checking" in c for c in cells(0))
+        assert any("Equity:Opening-Balances" in c for c in cells(0))
+        assert "4,098.45 USD" in cells(1)
+        assert "5,098.45 USD" in cells(1)  # total assets
+        assert "2,598.45 USD" in cells(1)  # implicit net-income line
+        # total liabilities + equity (incl. net income) balances total assets
+        assert "5,098.45 USD" in cells(1)
+
+        # Narrowing the as-of date recomputes the report: only the opening
+        # balance and salary deposit have posted by 2026-01-05.
+        screen.query_one("#as-of", Input).value = "2026-01-05"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+        assert "4,200.00 USD" in cells(1)  # net income through 2026-01-05
+
+        # An invalid date shows an error and keeps the last report.
+        screen.query_one("#as-of", Input).value = "not-a-date"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BalanceSheetScreen)
 
 
 async def test_ledger_info_screen(ledger_path):

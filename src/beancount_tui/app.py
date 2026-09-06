@@ -16,6 +16,7 @@ from beancount_tui.editor import append_entry, delete_entry, format_entry, repla
 from beancount_tui.importer import ImportCandidate
 from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
+from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -91,6 +92,7 @@ class BeancountTUI(App):
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
         ("g", "register", "Register"),
+        ("s", "balance_sheet", "Balance sheet"),
         ("L", "ledger_info", "Ledger info"),
         ("m", "import_csv", "Import CSV"),
         ("/", "filter", "Filter"),
@@ -172,6 +174,9 @@ class BeancountTUI(App):
             self.notify("No account selected.", severity="warning")
             return
         self.push_screen(RegisterScreen(self.ledger, self.selected_account))
+
+    def action_balance_sheet(self) -> None:
+        self.push_screen(BalanceSheetScreen(self.ledger))
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))

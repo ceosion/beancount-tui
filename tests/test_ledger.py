@@ -255,6 +255,41 @@ def test_income_statement_date_range(ledger_path):
     assert format_inventory(stmt.net) == "-1,537.35 USD"
 
 
+def test_balance_sheet_all_accounts(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    sheet = ledger.balance_sheet()
+    assert {a: format_inventory(b) for a, b in sheet.assets} == {
+        "Assets:Checking": "4,098.45 USD",
+        "Assets:Savings": "1,000.00 USD",
+    }
+    assert sheet.liabilities == []
+    assert {a: format_inventory(b) for a, b in sheet.equity} == {
+        "Equity:Opening-Balances": "2,500.00 USD",
+    }
+    assert format_inventory(sheet.assets_total) == "5,098.45 USD"
+    assert format_inventory(sheet.liabilities_total) == ""
+    assert format_inventory(sheet.equity_total) == "2,500.00 USD"
+    assert format_inventory(sheet.net_income) == "2,598.45 USD"
+
+    # The accounting equation holds once the implicit net-income line is
+    # folded in, even though nothing has actually closed the books yet.
+    assert sheet.assets_total == sheet.liabilities_total + sheet.equity_total + sheet.net_income
+
+
+def test_balance_sheet_as_of_excludes_later_postings(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    sheet = ledger.balance_sheet(as_of=datetime.date(2026, 1, 5))
+    assert {a: format_inventory(b) for a, b in sheet.assets} == {
+        "Assets:Checking": "6,700.00 USD",
+    }
+    assert sheet.liabilities == []
+    assert {a: format_inventory(b) for a, b in sheet.equity} == {
+        "Equity:Opening-Balances": "2,500.00 USD",
+    }
+    assert format_inventory(sheet.net_income) == "4,200.00 USD"
+    assert sheet.assets_total == sheet.liabilities_total + sheet.equity_total + sheet.net_income
+
+
 def test_root_account_has_balances(ledger_path):
     ledger = Ledger.load(ledger_path)
     root = ledger.root_account()
