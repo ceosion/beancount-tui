@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 from beancount.core import realization
+from beancount.core.inventory import Inventory
 from rich.cells import cell_len
 from rich.style import Style
 from rich.text import Text
 from textual.message import Message
 from textual.widgets import Tree
 from textual.widgets.tree import TreeNode
+
+from beancount_tui.ledger import Ledger
 
 
 class AccountTree(Tree[str]):
@@ -28,14 +31,14 @@ class AccountTree(Tree[str]):
         # Node id -> balance text, rendered right-aligned by ``render_label``.
         self._amounts: dict[int, str] = {}
 
-    def update_accounts(self, real_root: realization.RealAccount) -> None:
+    def update_accounts(self, real_root: realization.RealAccount, ledger: Ledger) -> None:
         self.clear()
         self._amounts.clear()
-        self._add_account_nodes(self.root, real_root)
+        self._add_account_nodes(self.root, real_root, ledger)
         self.root.expand()
 
     def _add_account_nodes(
-        self, node: TreeNode, real_account: realization.RealAccount
+        self, node: TreeNode, real_account: realization.RealAccount, ledger: Ledger
     ) -> None:
         for name in sorted(real_account):
             child = real_account[name]
@@ -45,10 +48,11 @@ class AccountTree(Tree[str]):
             amounts = ", ".join(
                 f"{pos.units.number:,} {pos.units.currency}" for pos in positions
             )
+            amounts += _conversion_note(ledger, balance)
             child_node = node.add(name, data=child.account, expand=True)
             if amounts:
                 self._amounts[child_node.id] = amounts
-            self._add_account_nodes(child_node, child)
+            self._add_account_nodes(child_node, child, ledger)
             if not child:
                 child_node.allow_expand = False
 
@@ -76,3 +80,28 @@ class AccountTree(Tree[str]):
     def on_tree_node_selected(self, event: Tree.NodeSelected) -> None:
         event.stop()
         self.post_message(self.AccountSelected(event.node.data))
+
+
+def _conversion_note(ledger: Ledger, balance: Inventory) -> str:
+    """A trailing ``  (≈ 175.32 USD)``-style note for a converted total.
+
+    Empty if no operating currency is configured, or if the balance is
+    already entirely denominated in it (nothing to convert). Currencies that
+    couldn't be priced are called out by name rather than silently dropped.
+    """
+    operating_currencies = ledger.options.get("operating_currency") or []
+    if not operating_currencies:
+        return ""
+    target = operating_currencies[0]
+    currencies = {pos.units.currency for pos in balance.get_positions()}
+    if currencies <= {target}:
+        return ""
+    total, unpriced = ledger.converted_total(balance)
+    parts = []
+    if total is not None:
+        parts.append(f"≈ {total:,.2f} {target}")
+    if unpriced:
+        parts.append(f"no price available for {', '.join(unpriced)}")
+    if not parts:
+        return ""
+    return "  (" + ", ".join(parts) + ")"

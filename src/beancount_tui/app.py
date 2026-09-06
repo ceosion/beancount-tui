@@ -197,7 +197,7 @@ class BeancountTUI(App):
         return filter_transactions(entries, self.filter_query)
 
     def refresh_views(self) -> None:
-        self.query_one(AccountTree).update_accounts(self.ledger.root_account())
+        self.query_one(AccountTree).update_accounts(self.ledger.root_account(), self.ledger)
         self.query_one(TransactionTable).update_entries(self._visible_entries())
         error_panel = self.query_one("#errors", Static)
         if self.ledger.errors:

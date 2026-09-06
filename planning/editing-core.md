@@ -53,7 +53,7 @@ reconciling it against a statement.
 
 ### EDIT-03: Multi-currency valuation display
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -66,13 +66,13 @@ to convert. Show "no price available" rather than silently omitting a
 currency that can't be converted.
 
 **Acceptance criteria:**
-- [ ] Sidebar/account balances show a converted total in the operating
+- [x] Sidebar/account balances show a converted total in the operating
       currency alongside native amounts, when at least one operating
       currency is configured and prices are available.
-- [ ] Currencies with no known price are called out rather than silently
+- [x] Currencies with no known price are called out rather than silently
       dropped from the total.
-- [ ] No operating currency configured → unchanged current behavior.
-- [ ] Test covering conversion math against a small ledger with known
+- [x] No operating currency configured → unchanged current behavior.
+- [x] Test covering conversion math against a small ledger with known
       prices.
 
 ---
