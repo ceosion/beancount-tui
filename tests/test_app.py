@@ -8,7 +8,7 @@ from rich.text import Text
 from textual.widgets import Checkbox, DataTable, Input, OptionList, Select, Static
 
 from beancount_tui.app import BeancountTUI, UndoManager
-from beancount_tui.editor import append_entry
+from beancount_tui.editor import append_entry, format_entry
 from beancount_tui.ledger import Ledger, transaction_amount_value
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
@@ -465,6 +465,34 @@ async def test_toggle_directives(ledger_path):
         await pilot.press("t")
         await pilot.pause()
         assert table.row_count == 6
+
+
+async def test_detail_panel_toggle_and_content(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        panel = app.query_one("#detail", Static)
+        # Hidden by default.
+        assert not panel.has_class("visible")
+
+        await pilot.press("v")
+        await pilot.pause()
+        assert panel.has_class("visible")
+
+        table = app.query_one(TransactionTable)
+        assert table.row_count > 1
+        table.move_cursor(row=0)
+        await pilot.pause()
+        assert str(panel.render()) == format_entry(table.shown[0])
+
+        last_row = table.row_count - 1
+        table.move_cursor(row=last_row)
+        await pilot.pause()
+        assert str(panel.render()) == format_entry(table.shown[last_row])
+
+        await pilot.press("v")
+        await pilot.pause()
+        assert not panel.has_class("visible")
 
 
 async def test_edit_note_directive(ledger_path):

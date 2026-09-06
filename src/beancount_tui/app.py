@@ -11,7 +11,7 @@ from pathlib import Path
 from beancount.core import data, getters, realization
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
-from textual.widgets import Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Static
 
 from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
 from beancount_tui.importer import ImportCandidate
@@ -142,6 +142,17 @@ class BeancountTUI(App):
     #filter.visible {
         display: block;
     }
+    #detail {
+        dock: bottom;
+        height: auto;
+        max-height: 12;
+        border-top: solid $primary;
+        padding: 0 1;
+        display: none;
+    }
+    #detail.visible {
+        display: block;
+    }
     """
 
     BINDINGS = [
@@ -151,6 +162,7 @@ class BeancountTUI(App):
         ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
         ("t", "toggle_directives", "Directives"),
+        ("v", "toggle_detail", "Detail"),
         ("u", "undo", "Undo"),
         ("U", "redo", "Redo"),
         ("i", "income_statement", "Income stmt"),
@@ -176,6 +188,7 @@ class BeancountTUI(App):
         self.selected_account: str | None = None
         self.filter_query: str = ""
         self.show_directives: bool = False
+        self.show_detail: bool = False
         self._watch_interval = watch_interval
         self._watched_mtimes = self.ledger.file_mtimes()
         # Bounded, chronological undo/redo history across every file touched.
@@ -188,6 +201,7 @@ class BeancountTUI(App):
             with Vertical():
                 yield FilterBar(id="filter")
                 yield TransactionTable(id="transactions")
+                yield Static(id="detail")
                 yield Static(id="errors")
         yield Footer()
 
@@ -208,6 +222,7 @@ class BeancountTUI(App):
     def refresh_views(self) -> None:
         self.query_one(AccountTree).update_accounts(self.ledger.root_account(), self.ledger)
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+        self._update_detail_panel()
         error_panel = self.query_one("#errors", Static)
         if self.ledger.errors:
             messages = "\n".join(
@@ -227,10 +242,30 @@ class BeancountTUI(App):
     def on_account_tree_account_selected(self, event: AccountTree.AccountSelected) -> None:
         self.selected_account = event.account
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+        self._update_detail_panel()
 
     def action_toggle_directives(self) -> None:
         self.show_directives = not self.show_directives
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+        self._update_detail_panel()
+
+    def action_toggle_detail(self) -> None:
+        self.show_detail = not self.show_detail
+        panel = self.query_one("#detail", Static)
+        panel.set_class(self.show_detail, "visible")
+        if self.show_detail:
+            self._update_detail_panel()
+
+    def _update_detail_panel(self) -> None:
+        """Refresh the detail panel with the currently highlighted entry's
+        full formatted source text, keyed off ``TransactionTable``'s cursor
+        (its ``selected_entry`` property)."""
+        entry = self.query_one(TransactionTable).selected_entry
+        panel = self.query_one("#detail", Static)
+        panel.update(format_entry(entry) if entry is not None else "")
+
+    def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
+        self._update_detail_panel()
 
     def action_income_statement(self) -> None:
         self.push_screen(IncomeStatementScreen(self.ledger))
@@ -302,6 +337,7 @@ class BeancountTUI(App):
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         self.filter_query = event.query
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+        self._update_detail_panel()
 
     def on_filter_bar_filter_accepted(self, event: FilterBar.FilterAccepted) -> None:
         self.query_one(TransactionTable).focus()
@@ -312,6 +348,7 @@ class BeancountTUI(App):
         bar.remove_class("visible")
         self.filter_query = ""
         self.query_one(TransactionTable).update_entries(self._visible_entries())
+        self._update_detail_panel()
         self.query_one(TransactionTable).focus()
 
     def _snapshot_for_undo(self, path: str | Path) -> None:
