@@ -19,6 +19,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("event", "Event — record a dated event value"),
     ("custom", "Custom — a user-defined directive"),
     ("query", "Query — a named BQL query"),
+    ("document", "Document — attach a file to an account"),
 )
 
 

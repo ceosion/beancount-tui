@@ -23,6 +23,7 @@ DISPLAYED_DIRECTIVES = (
     data.Event,
     data.Custom,
     data.Query,
+    data.Document,
 )
 
 
