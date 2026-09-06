@@ -258,11 +258,24 @@ def transaction_amount(txn: data.Transaction) -> str:
     """A one-line summary of a transaction's magnitude, e.g. ``120.50 USD``.
 
     Sums the absolute value of positive postings per currency; transactions
-    always balance, so this is the amount that changed hands.
+    always balance, so this is the amount that changed hands. Postings with a
+    cost basis (``10 HOOL {500.00 USD}``) or a price annotation
+    (``10 HOOL @ 55.00 USD``) contribute their cost/price currency amount
+    (e.g. ``5,000.00 USD``) rather than the raw commodity quantity, since
+    that's far more useful for at-a-glance scanning.
     """
     inventory = Inventory()
     for posting in txn.postings:
         if posting.units is not None and posting.units.number is not None:
             if posting.units.number > Decimal(0):
-                inventory.add_amount(posting.units)
+                amount = posting.units
+                if posting.cost is not None and posting.cost.number is not None:
+                    amount = data.Amount(
+                        amount.number * posting.cost.number, posting.cost.currency
+                    )
+                elif posting.price is not None and posting.price.number is not None:
+                    amount = data.Amount(
+                        amount.number * posting.price.number, posting.price.currency
+                    )
+                inventory.add_amount(amount)
     return format_inventory(inventory)
