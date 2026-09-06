@@ -44,6 +44,29 @@ class IncomeStatement:
 
 
 @dataclass
+class BalanceSheet:
+    """Per-account and total Assets/Liabilities/Equity balances as of a date.
+
+    Assets amounts are as recorded (debit-normal: a positive balance for a
+    normal asset). Liabilities and Equity are sign-inverted so a normal
+    credit balance reads positive, the same convention ``IncomeStatement``
+    uses for Income. ``net_income`` is the current period's income minus
+    expenses (see ``Ledger.income_statement``), the implicit line a
+    bean-close would otherwise fold into Equity — include it so:
+
+        assets_total == liabilities_total + equity_total + net_income
+    """
+
+    assets: list[tuple[str, Inventory]]
+    liabilities: list[tuple[str, Inventory]]
+    equity: list[tuple[str, Inventory]]
+    assets_total: Inventory
+    liabilities_total: Inventory
+    equity_total: Inventory
+    net_income: Inventory
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -164,6 +187,68 @@ class Ledger:
             for account, balance in sorted(per_account.items())
             if not balance.is_empty()
         ]
+
+    def balance_sheet(self, as_of: datetime.date | None = None) -> BalanceSheet:
+        """Summarize Assets/Liabilities/Equity postings as of ``as_of`` (default: today).
+
+        Sums every posting dated on or before ``as_of`` per account, the same
+        approach ``trial_balance`` uses across all five account types, but
+        restricted to Assets/Liabilities/Equity and split into those three
+        sections. Liabilities and Equity are sign-inverted to read as
+        positive credit-normal balances (like ``income_statement`` does for
+        Income), and the current period's net income (all transactions
+        through ``as_of``) is included as an implicit Equity-section line,
+        so ``assets_total == liabilities_total + equity_total + net_income``
+        even before a bean-close would fold it into Equity for real.
+        """
+        if as_of is None:
+            as_of = datetime.date.today()
+        name_assets = self.options.get("name_assets", "Assets")
+        name_liabilities = self.options.get("name_liabilities", "Liabilities")
+        name_equity = self.options.get("name_equity", "Equity")
+        per_account: dict[str, Inventory] = {}
+        for txn in self.transactions:
+            if txn.date > as_of:
+                continue
+            for posting in txn.postings:
+                root = posting.account.split(":", 1)[0]
+                if root not in (name_assets, name_liabilities, name_equity):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                per_account.setdefault(posting.account, Inventory()).add_amount(posting.units)
+
+        assets: list[tuple[str, Inventory]] = []
+        liabilities: list[tuple[str, Inventory]] = []
+        equity: list[tuple[str, Inventory]] = []
+        assets_total = Inventory()
+        liabilities_total = Inventory()
+        equity_total = Inventory()
+        for account in sorted(per_account):
+            balance = per_account[account]
+            if balance.is_empty():
+                continue
+            root = account.split(":", 1)[0]
+            if root == name_assets:
+                assets.append((account, balance))
+                assets_total.add_inventory(balance)
+            elif root == name_liabilities:
+                liabilities.append((account, -balance))
+                liabilities_total.add_inventory(-balance)
+            else:
+                equity.append((account, -balance))
+                equity_total.add_inventory(-balance)
+
+        net_income = self.income_statement(start=None, end=as_of).net
+        return BalanceSheet(
+            assets=assets,
+            liabilities=liabilities,
+            equity=equity,
+            assets_total=assets_total,
+            liabilities_total=liabilities_total,
+            equity_total=equity_total,
+            net_income=net_income,
+        )
 
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""

@@ -10,7 +10,7 @@ widget.
 
 ### RPT-01: Balance sheet view
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -22,11 +22,11 @@ computed the same way `Ledger.income_statement` does) so the sheet balances
 even mid-year, before a bean-close would fold it into Equity.
 
 **Acceptance criteria:**
-- [ ] New screen shows Assets, Liabilities, Equity with per-account and
+- [x] New screen shows Assets, Liabilities, Equity with per-account and
       section totals as of a selectable date (default: today).
-- [ ] Includes a synthetic net-income line so total Assets = total
+- [x] Includes a synthetic net-income line so total Assets = total
       Liabilities + Equity (+ net income).
-- [ ] Test covering totals against a known example ledger state.
+- [x] Test covering totals against a known example ledger state.
 
 ---
 
