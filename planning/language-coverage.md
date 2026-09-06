@@ -17,7 +17,7 @@ free-text box.
 
 ### LANG-01: Add-directive infrastructure + templates for existing types
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -37,15 +37,15 @@ already in `DISPLAYED_DIRECTIVES`). `LANG-02` through `LANG-07` reuse this
 same infrastructure to add new directive types.
 
 **Acceptance criteria:**
-- [ ] `a` binding opens a directive-type picker listing at least Open, Close,
+- [x] `a` binding opens a directive-type picker listing at least Open, Close,
       Balance, Pad, Note.
-- [ ] Choosing a type opens `DirectiveForm` pre-filled with a valid template
+- [x] Choosing a type opens `DirectiveForm` pre-filled with a valid template
       for that type, targeting the correct file when the ledger has includes.
-- [ ] Saving appends the entry, reloads the ledger, and the new entry appears
+- [x] Saving appends the entry, reloads the ledger, and the new entry appears
       in the table (behind the `t` toggle).
-- [ ] `editor.append_transaction` renamed to `append_entry` (or a thin
+- [x] `editor.append_transaction` renamed to `append_entry` (or a thin
       generic wrapper added) with call sites updated.
-- [ ] Tests: creating one of each of the five types via the new flow round-
+- [x] Tests: creating one of each of the five types via the new flow round-
       trips through a real ledger file and appears in `Ledger.entries` after
       reload.
 

@@ -66,8 +66,8 @@ def entry_line_span(lines: list[str], start_index: int) -> int:
     return count
 
 
-def append_transaction(path: str | Path, text: str) -> None:
-    """Append transaction ``text`` to the end of the ledger file."""
+def append_entry(path: str | Path, text: str) -> None:
+    """Append entry ``text`` (any directive type) to the end of the ledger file."""
     path = Path(path)
     existing = path.read_text(encoding="utf-8")
     separator = "" if existing.endswith("\n\n") or not existing else "\n"

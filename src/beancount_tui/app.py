@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
 from pathlib import Path
 
@@ -11,15 +12,30 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import Footer, Header, Static
 
-from beancount_tui.editor import append_transaction, delete_entry, format_entry, replace_entry
+from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
 from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
-from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
+from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
+
+# Minimal valid source text for each creatable non-transaction directive type,
+# ready for the user to fill in the placeholder account(s)/amount.
+_DIRECTIVE_TEMPLATES = {
+    "open": "{date} open Assets:FIXME",
+    "close": "{date} close Assets:FIXME",
+    "balance": "{date} balance Assets:FIXME  0.00 USD",
+    "pad": "{date} pad Assets:FIXME Equity:Opening-Balances",
+    "note": '{date} note Assets:FIXME "FIXME"',
+}
+
+
+def _directive_template(keyword: str, date: str) -> str:
+    return _DIRECTIVE_TEMPLATES[keyword].format(date=date)
 
 
 class BeancountTUI(App):
@@ -54,6 +70,7 @@ class BeancountTUI(App):
 
     BINDINGS = [
         ("n", "new_transaction", "New"),
+        ("a", "add_directive", "Add directive"),
         ("e", "edit_transaction", "Edit"),
         ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
@@ -190,12 +207,35 @@ class BeancountTUI(App):
                 return
             target = result.filename or self.ledger.path
             self._snapshot_for_undo(target)
-            append_transaction(target, result.text)
+            append_entry(target, result.text)
             self.action_reload()
 
         self.push_screen(
             TransactionForm(files=self.ledger.files, accounts=self.ledger.accounts), on_result
         )
+
+    def action_add_directive(self) -> None:
+        def on_type_chosen(keyword: str | None) -> None:
+            if keyword is None:
+                return
+            template = _directive_template(keyword, datetime.date.today().isoformat())
+
+            def on_form_result(result: DirectiveFormResult | None) -> None:
+                if result is None:
+                    return
+                target = result.filename or self.ledger.path
+                self._snapshot_for_undo(target)
+                append_entry(target, result.text)
+                self.action_reload()
+
+            self.push_screen(
+                DirectiveForm(
+                    template, title=f"New {keyword} directive", files=self.ledger.files
+                ),
+                on_form_result,
+            )
+
+        self.push_screen(DirectiveTypePicker(), on_type_chosen)
 
     def action_edit_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
@@ -215,17 +255,17 @@ class BeancountTUI(App):
             self.push_screen(_edit_form(entry, self.ledger.accounts), on_form_result)
             return
 
-        def on_text_result(text: str | None) -> None:
-            if text is None:
+        def on_directive_result(result: DirectiveFormResult | None) -> None:
+            if result is None:
                 return
             self._snapshot_for_undo(entry.meta["filename"])
-            replace_entry(entry, text)
+            replace_entry(entry, result.text)
             self.action_reload()
 
         keyword = type(entry).__name__.lower()
         self.push_screen(
             DirectiveForm(format_entry(entry).rstrip("\n"), title=f"Edit {keyword} directive"),
-            on_text_result,
+            on_directive_result,
         )
 
     def action_duplicate_transaction(self) -> None:
@@ -239,7 +279,7 @@ class BeancountTUI(App):
                 return
             target = result.filename or self.ledger.path
             self._snapshot_for_undo(target)
-            append_transaction(target, result.text)
+            append_entry(target, result.text)
             self.action_reload()
 
         self.push_screen(
