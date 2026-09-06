@@ -930,7 +930,9 @@ async def test_price_directive_displayed_in_table(ledger_path):
             i for i, e in enumerate(table.shown) if isinstance(e, data.Price)
         )
         row = table.get_row_at(row_index)
-        assert tuple(row) == ("2026-09-06", "price", "", "HOOL", "100.00 USD")
+        assert tuple(str(cell) for cell in row) == (
+            "2026-09-06", "price", "", "HOOL", "100.00 USD",
+        )
 
 
 async def test_add_event_directive(ledger_path):
@@ -954,7 +956,7 @@ async def test_add_event_directive(ledger_path):
         table = app.query_one(TransactionTable)
         event_row = next(i for i, e in enumerate(table.shown) if isinstance(e, data.Event))
         row = table.get_row_at(event_row)
-        assert row[1] == "event"
+        assert str(row[1]) == "event"
         assert row[3] == '"location": "Paris"'
 
     ledger = Ledger.load(ledger_path)
@@ -985,7 +987,7 @@ async def test_add_custom_directive(ledger_path):
         await pilot.pause()
         table = app.query_one(TransactionTable)
         row = next(e for e in table.shown if isinstance(e, data.Custom))
-        assert _entry_row(row) == (
+        assert tuple(str(cell) for cell in _entry_row(row)) == (
             "2026-09-06",
             "custom",
             "",
@@ -1018,7 +1020,7 @@ async def test_query_directive_display(ledger_path):
             i for i, e in enumerate(table.shown) if isinstance(e, data.Query)
         )
         row = table.get_row_at(query_row)
-        assert row[1] == "query"
+        assert str(row[1]) == "query"
         assert row[3] == f"cash: {long_query_text[:40]}..."
 
 
@@ -1100,7 +1102,7 @@ def test_document_directive_row_flags_missing_file(tmp_path):
 
     date, keyword, payee, summary, amount = _entry_row(present_entry)
     assert date == "2026-01-20"
-    assert keyword == "document"
+    assert str(keyword) == "document"
     assert payee == ""
     assert amount == ""
     assert summary == f"Assets:Checking: {existing}"
@@ -1173,10 +1175,98 @@ async def test_commodity_directive_displayed_in_table(ledger_path):
         }
 
         hool_row = table.get_row_at(by_currency["HOOL"])
-        assert tuple(hool_row) == ("2026-09-06", "commodity", "", "HOOL (Alphabet Inc)", "")
+        assert tuple(str(cell) for cell in hool_row) == (
+            "2026-09-06", "commodity", "", "HOOL (Alphabet Inc)", "",
+        )
 
         usd_row = table.get_row_at(by_currency["USD"])
-        assert tuple(usd_row) == ("2026-09-06", "commodity", "", "USD", "")
+        assert tuple(str(cell) for cell in usd_row) == (
+            "2026-09-06", "commodity", "", "USD", "",
+        )
+
+
+def test_directive_keyword_styling_is_distinct_per_type(tmp_path):
+    """UX-04: with the ``t`` toggle on, a table mixing every directive type
+    should stay scannable rather than reading as a wall of similar rows.
+
+    There's no interactive terminal available to eyeball this, so it's
+    verified programmatically: load a ledger containing one of every
+    directive type, run each entry through ``_entry_row`` (the same
+    row-building function ``TransactionTable`` uses), and check that every
+    directive keyword renders as a colored ``rich.text.Text`` cell with a
+    style unique to its directive type.
+    """
+    ledger_text = """
+2026-01-01 open Assets:Checking USD
+2026-01-01 open Expenses:Food USD
+2026-01-01 open Equity:Opening-Balances USD
+
+2026-02-01 commodity HOOL
+  name: "Alphabet Inc"
+
+2026-03-01 price HOOL 100.00 USD
+
+2026-04-01 balance Assets:Checking 0.00 USD
+
+2026-05-01 pad Assets:Checking Equity:Opening-Balances
+
+2026-05-02 balance Assets:Checking 500.00 USD
+
+2026-06-01 note Assets:Checking "Reconciled"
+
+2026-07-01 event "location" "Paris"
+
+2026-08-01 document Assets:Checking "receipt.pdf"
+
+2026-09-01 custom "budget" "Groceries" 500.00 USD
+
+2026-10-01 query "cash" "SELECT account, sum(position) GROUP BY account"
+
+2026-11-01 * "Corner Cafe" "Coffee"
+  Assets:Checking  -4.50 USD
+  Expenses:Food     4.50 USD
+
+2026-12-01 close Expenses:Food
+"""
+    ledger_file = tmp_path / "all_directives.beancount"
+    ledger_file.write_text(ledger_text, encoding="utf-8")
+    ledger = Ledger.load(ledger_file)
+
+    directive_types = [
+        data.Open, data.Close, data.Balance, data.Pad, data.Note,
+        data.Price, data.Event, data.Custom, data.Query, data.Commodity,
+        data.Document,
+    ]
+    keyword_by_type: dict[type, Text] = {}
+    for entry in ledger.entries:
+        for directive_type in directive_types:
+            if isinstance(entry, directive_type) and directive_type not in keyword_by_type:
+                _, keyword, *_ = _entry_row(entry)
+                keyword_by_type[directive_type] = keyword
+
+    # Every directive type actually showed up in the fixture ledger.
+    assert set(keyword_by_type) == set(directive_types)
+
+    # Each keyword cell carries a non-empty style, and no two directive
+    # types share the same one -- that's what keeps a mixed table scannable.
+    styles: dict[type, str] = {}
+    for directive_type, keyword in keyword_by_type.items():
+        assert isinstance(keyword, Text)
+        assert keyword.style
+        styles[directive_type] = keyword.style
+    assert len(set(styles.values())) == len(styles)
+
+    # A Transaction's flag cell is left as plain text (unstyled), for
+    # contrast against the colorized directive keywords. (The pad directive
+    # above also synthesizes its own reconciling transaction, flagged "P",
+    # so look up the one we wrote explicitly.)
+    txn = next(
+        e for e in ledger.entries
+        if isinstance(e, data.Transaction) and e.payee == "Corner Cafe"
+    )
+    _, txn_flag, *_ = _entry_row(txn)
+    assert txn_flag == "*"
+    assert not isinstance(txn_flag, Text)
 
 
 async def test_delete_directive_with_confirmation(ledger_path):
