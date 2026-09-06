@@ -1,6 +1,7 @@
 import datetime
 from decimal import Decimal
 
+from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
     Ledger,
     filter_transactions,
@@ -32,6 +33,34 @@ def test_transaction_amount(ledger_path):
     ledger = Ledger.load(ledger_path)
     rent = ledger.transactions_for_account("Expenses:Rent")[0]
     assert transaction_amount(rent) == "1,450.00 USD"
+
+
+def test_transaction_amount_with_cost_basis(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert transaction_amount(txn) == "5,000.00 USD"
+
+
+def test_transaction_amount_with_price_annotation(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-21 * "Buy at price"\n'
+        "  Assets:Investments  10 HOOL @ 55.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert transaction_amount(txn) == "550.00 USD"
 
 
 def test_entries_for_account_includes_directives(ledger_path):

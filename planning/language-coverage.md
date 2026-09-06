@@ -211,7 +211,7 @@ detail panel (`UX-03`).
 
 ### LANG-10: Cost basis and price annotations in the table
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -224,11 +224,11 @@ or `price` set and represent them using the cost/price total in the amount
 summary instead of the bare commodity count.
 
 **Acceptance criteria:**
-- [ ] A transaction with a `{cost}`-annotated posting shows a sensible
+- [x] A transaction with a `{cost}`-annotated posting shows a sensible
       currency amount in the table, not a raw commodity quantity.
-- [ ] A transaction with a `@ price` annotation is represented similarly.
-- [ ] Existing behavior for plain-currency postings is unchanged.
-- [ ] Test covering both cost-basis and price-annotation formatting.
+- [x] A transaction with a `@ price` annotation is represented similarly.
+- [x] Existing behavior for plain-currency postings is unchanged.
+- [x] Test covering both cost-basis and price-annotation formatting.
 
 ---
 
