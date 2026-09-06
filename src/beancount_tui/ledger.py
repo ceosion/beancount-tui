@@ -24,6 +24,7 @@ DISPLAYED_DIRECTIVES = (
     data.Custom,
     data.Query,
     data.Document,
+    data.Commodity,
 )
 
 

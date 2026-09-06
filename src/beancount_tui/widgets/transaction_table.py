@@ -1,7 +1,8 @@
 """Table of ledger entries for the selected account.
 
 Shows transactions and, when the app's directives toggle is on, the
-account-level directives (open, close, balance, pad, note, query) as well.
+account-level directives (open, close, balance, pad, note, query, commodity)
+as well.
 """
 
 from __future__ import annotations
@@ -81,6 +82,10 @@ def _entry_row(entry: data.Directive) -> tuple[str, str, str, str, str]:
         if len(query_text) > 40:
             query_text = f"{query_text[:40]}..."
         return (date, "query", "", f"{entry.name}: {query_text}", "")
+    if isinstance(entry, data.Commodity):
+        name = entry.meta.get("name") if entry.meta else None
+        summary = f"{entry.currency} ({name})" if name else entry.currency
+        return (date, "commodity", "", summary, "")
     if isinstance(entry, data.Document):
         summary = f"{entry.account}: {entry.filename}"
         # Beancount resolves ``filename`` to an absolute path (relative to the

@@ -73,7 +73,7 @@ CCY`), and add it to the LANG-01 type picker with a template like
 
 ### LANG-03: Commodity directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -82,10 +82,10 @@ date, `"commodity"`, the commodity symbol, and (if present) a `name`
 metadata value in the summary column.
 
 **Acceptance criteria:**
-- [ ] `Commodity` entries display with symbol and any `name` metadata.
-- [ ] Creatable via the LANG-01 picker with a template
+- [x] `Commodity` entries display with symbol and any `name` metadata.
+- [x] Creatable via the LANG-01 picker with a template
       (`2026-09-06 commodity HOOL`).
-- [ ] Test covering display and round-trip creation.
+- [x] Test covering display and round-trip creation.
 
 ---
 

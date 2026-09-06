@@ -37,6 +37,7 @@ _DIRECTIVE_TEMPLATES = {
     "custom": '{date} custom "budget" "FIXME"',
     "query": '{date} query "FIXME" "SELECT account, sum(position) GROUP BY account"',
     "document": '{date} document Assets:FIXME "path/to/file.pdf"',
+    "commodity": "{date} commodity HOOL",
 }
 
 
