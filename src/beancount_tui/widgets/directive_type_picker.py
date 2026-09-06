@@ -20,6 +20,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("custom", "Custom — a user-defined directive"),
     ("query", "Query — a named BQL query"),
     ("document", "Document — attach a file to an account"),
+    ("commodity", "Commodity — declare a currency/commodity symbol"),
 )
 
 

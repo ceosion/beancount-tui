@@ -481,7 +481,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
         assert ids == {
             "open", "close", "balance", "pad", "note", "price", "event", "custom", "query",
-            "document",
+            "document", "commodity",
         }
 
         await pilot.press("escape")
@@ -843,6 +843,52 @@ async def test_add_document_directive(ledger_path):
     assert not ledger.errors
     documents = [e for e in ledger.entries if isinstance(e, data.Document)]
     assert any(d.account == "Assets:Checking" and d.filename == str(receipt) for d in documents)
+
+
+async def test_add_commodity_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "commodity")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert "commodity HOOL" in form.query_one("#text").text
+
+        form.query_one("#text").text = (
+            '2026-09-06 commodity HOOL\n  name: "Alphabet Inc"'
+        )
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    commodities = [e for e in ledger.entries if isinstance(e, data.Commodity)]
+    assert any(
+        c.currency == "HOOL" and c.meta.get("name") == "Alphabet Inc" for c in commodities
+    )
+
+
+async def test_commodity_directive_displayed_in_table(ledger_path):
+    append_entry(ledger_path, "2026-09-06 commodity HOOL\n  name: \"Alphabet Inc\"")
+    append_entry(ledger_path, "2026-09-06 commodity USD")
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        by_currency = {
+            e.currency: i for i, e in enumerate(table.shown) if isinstance(e, data.Commodity)
+        }
+
+        hool_row = table.get_row_at(by_currency["HOOL"])
+        assert tuple(hool_row) == ("2026-09-06", "commodity", "", "HOOL (Alphabet Inc)", "")
+
+        usd_row = table.get_row_at(by_currency["USD"])
+        assert tuple(usd_row) == ("2026-09-06", "commodity", "", "USD", "")
 
 
 async def test_delete_directive_with_confirmation(ledger_path):
