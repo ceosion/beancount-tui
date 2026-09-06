@@ -7,6 +7,7 @@ from beancount_tui.editor import (
     delete_entry,
     entry_line_span,
     parse_directive_text,
+    parse_directives_text,
     parse_transaction_text,
     replace_entry,
 )
@@ -43,6 +44,25 @@ def test_parse_directive_text_valid():
 def test_parse_directive_text_rejects_multiple():
     with pytest.raises(TransactionParseError, match="exactly one"):
         parse_directive_text("2026-01-20 open Assets:Cash\n2026-01-21 open Assets:Bank\n")
+
+
+def test_parse_directives_text_returns_each_directive():
+    # Used for combined text blocks (e.g. a `pad` immediately followed by
+    # its `balance` assertion) that `parse_directive_text` would otherwise
+    # reject for holding more than one directive. Beancount's parser sorts
+    # its output (by its own SORT_ORDER, not source order), so check by
+    # type rather than by position.
+    entries = parse_directives_text(
+        "2026-01-20 pad Assets:Checking Equity:Opening-Balances\n"
+        "2026-01-20 balance Assets:Checking  100.00 USD\n"
+    )
+    assert len(entries) == 2
+    assert {type(entry) for entry in entries} == {data.Pad, data.Balance}
+
+
+def test_parse_directives_text_syntax_error():
+    with pytest.raises(TransactionParseError):
+        parse_directives_text("2026-01-20 pad Assets:Checking\n")
 
 
 def test_parse_transaction_text_rejects_non_transaction():

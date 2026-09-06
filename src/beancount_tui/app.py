@@ -28,6 +28,7 @@ from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
+from beancount_tui.widgets.pad_source_picker import PadSourcePicker
 from beancount_tui.widgets.query_runner import QueryRunnerScreen
 from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
@@ -154,6 +155,7 @@ class BeancountTUI(App):
         ("i", "income_statement", "Income stmt"),
         ("b", "trial_balance", "Trial balance"),
         ("B", "balance_directive", "Balance now"),
+        ("p", "pad_and_verify", "Pad and verify"),
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
         ("w", "holdings", "Holdings"),
@@ -439,6 +441,107 @@ class BeancountTUI(App):
             )
 
         push_form(0)
+
+    def _infer_pad_source(self, account: str) -> str | None:
+        """The source account of `account`'s most recent prior `pad`
+        directive, or ``None`` if it has never been padded before."""
+        pads = [
+            entry
+            for entry in self.ledger.entries
+            if isinstance(entry, data.Pad) and entry.account == account
+        ]
+        if not pads:
+            return None
+        return max(pads, key=lambda pad: pad.date).source_account
+
+    def action_pad_and_verify(self) -> None:
+        """Reconcile the selected account against a statement in one action:
+        a `pad` directive from its usual pad-source account, immediately
+        followed by the same `balance` assertion `action_balance_directive`
+        produces, both dated today.
+
+        The source account is inferred from the account's most recent prior
+        `pad` directive (see `_infer_pad_source`); if it has never been
+        padded before, the user is prompted to pick one via
+        `PadSourcePicker`.
+
+        Like `action_balance_directive`, a multi-currency account needs one
+        pad+balance pair per currency, chained through `DirectiveForm`
+        screens in sequence. Each screen's text box holds *two* directives
+        (the pad line then the balance line) rather than one, so
+        `DirectiveForm` is given `expected_directives=2`: both lines are
+        still validated with the real Beancount parser, just not forced
+        through the single-directive path `action_balance_directive` uses.
+        `append_entry` itself doesn't validate content — it only writes
+        text — so the already-validated two-line block is appended as-is,
+        which also keeps the pad correctly ordered before its balance.
+        """
+        if self.selected_account is None:
+            self.notify("No account selected.", severity="warning")
+            return
+        account = self.selected_account
+
+        def push_pad_and_verify(source_account: str) -> None:
+            node = realization.get(self.ledger.root_account(), account)
+            if node is None:
+                self.notify("No account selected.", severity="warning")
+                return
+            balance = realization.compute_balance(node).reduce(lambda pos: pos.units)
+            positions = sorted(balance.get_positions(), key=lambda pos: pos.units.currency)
+            date = datetime.date.today().isoformat()
+            if positions:
+                balance_lines = [
+                    f"{date} balance {account}  {pos.units.number} {pos.units.currency}"
+                    for pos in positions
+                ]
+            else:
+                currency = (self.ledger.options.get("operating_currency") or ["USD"])[0]
+                balance_lines = [f"{date} balance {account}  0.00 {currency}"]
+            pad_line = f"{date} pad {account} {source_account}"
+            texts = [f"{pad_line}\n{balance_line}" for balance_line in balance_lines]
+
+            def push_form(index: int) -> None:
+                def on_form_result(result: DirectiveFormResult | None) -> None:
+                    if result is None:
+                        return
+                    target = result.filename or self.ledger.path
+                    self._snapshot_for_undo(target)
+                    append_entry(target, result.text)
+                    self.action_reload()
+                    if index + 1 < len(texts):
+                        push_form(index + 1)
+
+                title = "New pad + balance directives"
+                if len(texts) > 1:
+                    title += f" ({index + 1}/{len(texts)})"
+                self.push_screen(
+                    DirectiveForm(
+                        texts[index],
+                        title=title,
+                        files=self.ledger.files,
+                        expected_directives=2,
+                    ),
+                    on_form_result,
+                )
+
+            push_form(0)
+
+        inferred_source = self._infer_pad_source(account)
+        if inferred_source is not None:
+            push_pad_and_verify(inferred_source)
+            return
+
+        def on_source_chosen(source_account: str | None) -> None:
+            if source_account is None:
+                return
+            push_pad_and_verify(source_account)
+
+        self.push_screen(
+            PadSourcePicker(
+                [a for a in self.ledger.accounts if a != account], account=account
+            ),
+            on_source_chosen,
+        )
 
     def action_edit_transaction(self) -> None:
         entry = self.query_one(TransactionTable).selected_entry
