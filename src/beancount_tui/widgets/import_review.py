@@ -100,13 +100,27 @@ def _row_from_candidate(
     candidate: ImportCandidate,
     existing_transactions: list[data.Transaction] | None = None,
 ) -> _Row:
-    date = candidate.date.isoformat() if candidate.date else datetime.date.today().isoformat()
-    flag = "*"
-    payee = candidate.payee
-    narration = candidate.narration
-    tags_links = ""
-    amount = candidate.amount if candidate.amount is not None else Decimal("0.00")
-    postings_text = f"{candidate.account}  {amount} USD\nExpenses:FIXME"
+    if candidate.transaction is not None:
+        # IMP-04: beangulp already produced a fully-formed transaction with
+        # real postings, payee, narration, tags and links — render it as-is
+        # instead of the CSV path's single-posting-plus-placeholder shape.
+        txn = candidate.transaction
+        date = txn.date.isoformat()
+        flag = txn.flag or "*"
+        payee = txn.payee or ""
+        narration = txn.narration or ""
+        tags_links = _tags_links_text(txn)
+        postings_text = _postings_text(txn)
+    else:
+        date = (
+            candidate.date.isoformat() if candidate.date else datetime.date.today().isoformat()
+        )
+        flag = "*"
+        payee = candidate.payee
+        narration = candidate.narration
+        tags_links = ""
+        amount = candidate.amount if candidate.amount is not None else Decimal("0.00")
+        postings_text = f"{candidate.account}  {amount} USD\nExpenses:FIXME"
     text = _assemble_transaction_text(date, flag, payee, narration, tags_links, postings_text)
     duplicate_reason = find_duplicate_reason(candidate, existing_transactions or [])
     return _Row(

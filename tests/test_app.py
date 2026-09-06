@@ -5,7 +5,7 @@ from pathlib import Path
 
 from beancount.core import data
 from rich.text import Text
-from textual.widgets import Checkbox, DataTable, OptionList, Select
+from textual.widgets import Checkbox, DataTable, Input, OptionList, Select, Static
 
 from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry
@@ -14,6 +14,7 @@ from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
+from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
@@ -31,6 +32,8 @@ from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
 FIXTURE_CSV = Path(__file__).parent / "fixtures" / "sample_import.csv"
+FIXTURE_BEANGULP_MODULE = Path(__file__).parent / "fixtures" / "sample_beangulp_importer.py"
+FIXTURE_BEANGULP_SOURCE = Path(__file__).parent / "fixtures" / "sample_bank_export.txt"
 
 
 async def _pick_directive_type(pilot, keyword: str) -> None:
@@ -1814,6 +1817,95 @@ async def test_import_csv_binding_opens_review_screen(ledger_path):
         review._do_import()
         await pilot.pause()
         assert not isinstance(app.screen, ImportReviewScreen)
+
+
+async def test_import_beangulp_binding_opens_review_screen(ledger_path):
+    """IMP-04 end to end via the "M" binding: point at a fixture beangulp
+    importer module + source file, and confirm the extracted transactions
+    (with their real, already-fully-formed postings) reach the *same*
+    ImportReviewScreen/append path as CSV import."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("M")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, BeangulpImportForm)
+
+        form.query_one("#module-path", Input).value = str(FIXTURE_BEANGULP_MODULE)
+        form.query_one("#source-path", Input).value = str(FIXTURE_BEANGULP_SOURCE)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, BeangulpImportForm)
+        review = app.screen
+        assert isinstance(review, ImportReviewScreen)
+        assert len(review._rows) == 2
+
+        first_row = review._rows[0]
+        assert first_row.payee == "Coffee Shop"
+        assert first_row.narration == "Latte"
+        # The real second posting (a placeholder-free, fully-formed
+        # transaction from beangulp) survives into the assembled text.
+        assert "Expenses:Food:Restaurant" in first_row.postings_text
+        assert "Assets:FIXME" not in first_row.postings_text
+
+        review._do_import()
+        await pilot.pause()
+        assert not isinstance(app.screen, ImportReviewScreen)
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    payees = {txn.payee for txn in ledger.transactions}
+    assert "Coffee Shop" in payees
+    assert "Employer" in payees
+
+
+async def test_import_beangulp_no_matching_importer_shows_inline_error(ledger_path):
+    """A source file no importer identifies produces a clear inline error,
+    not a crash."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("M")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, BeangulpImportForm)
+
+        form.query_one("#module-path", Input).value = str(FIXTURE_BEANGULP_MODULE)
+        form.query_one("#source-path", Input).value = str(FIXTURE_CSV)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        # Still on the form: the error was caught and shown, not raised.
+        assert isinstance(app.screen, BeangulpImportForm)
+        assert "No importer" in str(form.query_one("#error", Static).render())
+
+
+async def test_import_beangulp_module_fails_to_load_shows_inline_error(ledger_path):
+    """A module with a syntax error produces a clear inline error, not a crash."""
+    broken_module = Path(__file__).parent / "fixtures" / "broken_beangulp_importer.py"
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("M")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, BeangulpImportForm)
+
+        form.query_one("#module-path", Input).value = str(broken_module)
+        form.query_one("#source-path", Input).value = str(FIXTURE_BEANGULP_SOURCE)
+        await pilot.pause()
+
+        form._do_import()
+        await pilot.pause()
+
+        assert isinstance(app.screen, BeangulpImportForm)
+        assert "Failed to load" in str(form.query_one("#error", Static).render())
 
 
 def _import_review_setup_and_parse(form) -> None:
