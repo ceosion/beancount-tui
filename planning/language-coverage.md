@@ -91,7 +91,7 @@ metadata value in the summary column.
 
 ### LANG-04: Event directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1h
 
@@ -99,10 +99,10 @@ metadata value in the summary column.
 event type, and description (e.g. `"location": "Paris"`).
 
 **Acceptance criteria:**
-- [ ] `Event` entries display with type and description.
-- [ ] Creatable via the LANG-01 picker with a template
+- [x] `Event` entries display with type and description.
+- [x] Creatable via the LANG-01 picker with a template
       (`2026-09-06 event "location" "Paris"`).
-- [ ] Test covering display and round-trip creation.
+- [x] Test covering display and round-trip creation.
 
 ---
 
