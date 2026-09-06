@@ -45,7 +45,7 @@ toggling ascending/descending on repeat.
 
 ### UX-03: Transaction/directive detail panel
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -55,11 +55,11 @@ shows the full source text of the currently selected entry via the existing
 `editor.format_entry`, updating as the cursor moves.
 
 **Acceptance criteria:**
-- [ ] Selecting a row updates the detail panel with that entry's full
+- [x] Selecting a row updates the detail panel with that entry's full
       formatted source text.
-- [ ] Panel is togglable (doesn't have to always be visible, to preserve
+- [x] Panel is togglable (doesn't have to always be visible, to preserve
       table space on small terminals).
-- [ ] Test covering the panel content matches `format_entry` output for a
+- [x] Test covering the panel content matches `format_entry` output for a
       selected entry.
 
 ---
