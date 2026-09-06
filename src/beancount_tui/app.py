@@ -23,6 +23,7 @@ from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
 from beancount_tui.widgets.transaction_table import TransactionTable
+from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
 # Minimal valid source text for each creatable non-transaction directive type,
 # ready for the user to fill in the placeholder account(s)/amount.
@@ -84,6 +85,7 @@ class BeancountTUI(App):
         ("t", "toggle_directives", "Directives"),
         ("u", "undo", "Undo"),
         ("i", "income_statement", "Income stmt"),
+        ("b", "trial_balance", "Trial balance"),
         ("L", "ledger_info", "Ledger info"),
         ("/", "filter", "Filter"),
         ("r", "reload", "Reload"),
@@ -154,6 +156,9 @@ class BeancountTUI(App):
 
     def action_income_statement(self) -> None:
         self.push_screen(IncomeStatementScreen(self.ledger))
+
+    def action_trial_balance(self) -> None:
+        self.push_screen(TrialBalanceScreen(self.ledger))
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))

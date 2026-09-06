@@ -142,6 +142,29 @@ class Ledger:
         net.add_inventory(-expenses_total)
         return IncomeStatement(income, expenses, income_total, expenses_total, net)
 
+    def trial_balance(self, as_of: datetime.date | None = None) -> list[tuple[str, Inventory]]:
+        """Nonzero balances for every account, as of ``as_of`` (default: today).
+
+        Sums every posting dated on or before ``as_of`` per account, across
+        all five account types, and drops accounts whose net balance is
+        zero. Sorted by account name.
+        """
+        if as_of is None:
+            as_of = datetime.date.today()
+        per_account: dict[str, Inventory] = {}
+        for txn in self.transactions:
+            if txn.date > as_of:
+                continue
+            for posting in txn.postings:
+                if posting.units is None or posting.units.number is None:
+                    continue
+                per_account.setdefault(posting.account, Inventory()).add_amount(posting.units)
+        return [
+            (account, balance)
+            for account, balance in sorted(per_account.items())
+            if not balance.is_empty()
+        ]
+
     def file_mtimes(self) -> dict[Path, float]:
         """Modification times of all source files, for change detection."""
         mtimes = {}

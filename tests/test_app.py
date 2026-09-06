@@ -18,6 +18,7 @@ from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
 from beancount_tui.widgets.transaction_table import TransactionTable, _entry_row
+from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
 
 async def _pick_directive_type(pilot, keyword: str) -> None:
@@ -1031,6 +1032,44 @@ async def test_income_statement_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, IncomeStatementScreen)
+
+
+async def test_trial_balance_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("b")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, TrialBalanceScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        # As-of defaults to today, so every account with a nonzero balance
+        # over the whole (Jan-2026-dated) example ledger appears.
+        assert any("Assets:Checking" in c for c in cells(0))
+        assert any("Income:Salary" in c for c in cells(0))
+        assert "4,098.45 USD" in cells(1)
+
+        # Narrowing the as-of date recomputes the report: only the opening
+        # balance and salary deposit have posted by 2026-01-05.
+        screen.query_one("#as-of", Input).value = "2026-01-05"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+        assert not any("Expenses:Rent" in c for c in cells(0))
+
+        # An invalid date shows an error and keeps the last report.
+        screen.query_one("#as-of", Input).value = "not-a-date"
+        await pilot.pause()
+        assert "6,700.00 USD" in cells(1)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, TrialBalanceScreen)
 
 
 async def test_ledger_info_screen(ledger_path):
