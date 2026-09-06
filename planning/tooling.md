@@ -62,7 +62,7 @@ the current suite.
 
 ### TOOL-04: Package and publish
 
-- **Status:** todo
+- **Status:** blocked — awaiting PyPI credentials
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -72,8 +72,12 @@ project URLs, license), add a `CHANGELOG.md`, and publish to PyPI so
 checkout.
 
 **Acceptance criteria:**
-- [ ] `pyproject.toml` has classifiers, homepage/repository URLs, and a
+- [x] `pyproject.toml` has classifiers, homepage/repository URLs, and a
       license field.
-- [ ] `CHANGELOG.md` exists with at least a first-release entry.
+- [x] `CHANGELOG.md` exists with at least a first-release entry.
 - [ ] Package published to PyPI; `uvx beancount-tui --help` works from a
       clean environment.
+
+Note: actual publishing to PyPI requires a human with real PyPI credentials
+(API token / trusted-publisher setup) to run; it was intentionally left
+undone here.
