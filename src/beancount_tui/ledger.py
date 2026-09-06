@@ -20,6 +20,7 @@ DISPLAYED_DIRECTIVES = (
     data.Pad,
     data.Note,
     data.Price,
+    data.Event,
 )
 
 

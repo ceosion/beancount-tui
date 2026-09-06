@@ -32,6 +32,7 @@ _DIRECTIVE_TEMPLATES = {
     "pad": "{date} pad Assets:FIXME Equity:Opening-Balances",
     "note": '{date} note Assets:FIXME "FIXME"',
     "price": "{date} price FIXME  0.00 USD",
+    "event": '{date} event "location" "FIXME"',
 }
 
 

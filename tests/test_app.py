@@ -367,7 +367,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         assert isinstance(picker, DirectiveTypePicker)
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
-        assert ids == {"open", "close", "balance", "pad", "note", "price"}
+        assert ids == {"open", "close", "balance", "pad", "note", "price", "event"}
 
         await pilot.press("escape")
         await pilot.pause()
@@ -528,6 +528,36 @@ async def test_price_directive_displayed_in_table(ledger_path):
         )
         row = table.get_row_at(row_index)
         assert tuple(row) == ("2026-09-06", "price", "", "HOOL", "100.00 USD")
+
+
+async def test_add_event_directive(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "event")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'event "location" "FIXME"' in form.query_one("#text").text
+
+        form.query_one("#text").text = '2026-09-06 event "location" "Paris"'
+        form._save()
+        await pilot.pause()
+
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        event_row = next(i for i, e in enumerate(table.shown) if isinstance(e, data.Event))
+        row = table.get_row_at(event_row)
+        assert row[1] == "event"
+        assert row[3] == '"location": "Paris"'
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    events = [e for e in ledger.entries if isinstance(e, data.Event)]
+    assert any(e.type == "location" and e.description == "Paris" for e in events)
 
 
 async def test_add_directive_into_included_file(multi_ledger_path):
