@@ -35,6 +35,8 @@ everything it depends on is `done`, unless its notes say otherwise.
 | [import.md](import.md) | `IMP` | CSV import wizard and beangulp integration. |
 | [ux.md](ux.md) | `UX` | Help screen, sortable columns, entry detail panel. |
 | [tooling.md](tooling.md) | `TOOL` | Snapshot tests, CI matrix, coverage, packaging/publishing. |
+| [budgeting.md](budgeting.md) | `BUDGET` | Per-account budget targets via Fava's `custom "budget"` convention, proration, budget-vs-actual report. |
+| [forecasting.md](forecasting.md) | `FORECAST` | Recurring/scheduled transaction templates and a virtual (never-persisted) forward-looking cash-flow projection, blending templates with budget targets. |
 
 ## Suggested order
 
@@ -47,6 +49,15 @@ Dependencies are authoritative; this is just a reasonable path through them:
    `RPT-05` and `RPT-06` want `LANG-02`/`LANG-10` first for consistent data.
 4. `EDIT`, `IMP`, `UX`, `TOOL` are largely independent of each other and of
    `LANG`/`RPT`, except where individual tasks note otherwise.
+5. `BUDGET-01` through `BUDGET-04` are a strict chain (parsing → proration →
+   report → rollup); `BUDGET-05` (creation form) and `BUDGET-06`
+   (discoverability) can start as soon as their own dependencies land.
+6. `FORECAST` follows `BUDGET` — `FORECAST-05` needs `BUDGET-02`'s proration.
+   `FORECAST-01`/`FORECAST-02` (data model + excluding templates from actual
+   views) come first since everything else depends on them; `FORECAST-03`
+   (creation form) can proceed in parallel with `FORECAST-04`→`FORECAST-06`
+   (projection engine → budget fallback → report screen), which is itself a
+   strict chain.
 
 ## Baseline (already implemented, for context)
 
@@ -67,4 +78,5 @@ Not tracked as tasks — this is what v0.1 already shipped, per git history:
 
 ## Total scope
 
-33 tasks across 6 areas: 11 `LANG`, 6 `RPT`, 4 `EDIT`, 4 `IMP`, 4 `UX`, 4 `TOOL`.
+46 tasks across 8 areas: 11 `LANG`, 6 `RPT`, 4 `EDIT`, 4 `IMP`, 4 `UX`, 4
+`TOOL`, 6 `BUDGET`, 7 `FORECAST`.
