@@ -23,6 +23,7 @@ from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.forecast_screen import ForecastScreen
 from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
@@ -2060,6 +2061,132 @@ async def test_budget_screen_binding_opens_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, BudgetScreen)
+
+
+async def test_forecast_screen_blends_actual_and_projected(ledger_path):
+    # FORECAST-06's acceptance-criteria fixture: one recurring template
+    # (Expenses:Rent, firing 2026-04-20, after "today") plus one budget
+    # (Expenses:Food:Groceries, 10.00 USD/day). A fixed "today" of
+    # 2026-04-15 makes the actual/projected split deterministic regardless
+    # of the real wall-clock date; example.beancount's own January-dated
+    # postings fall outside this April window so they can't interfere.
+    append_entry(
+        ledger_path,
+        '2026-04-20 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n'
+        # A real (non-template) purchase before "today", counted as Actual.
+        '2026-04-05 * "Green Grocer" "Early April groceries"\n'
+        "  Expenses:Food:Groceries     87.35 USD\n"
+        "  Assets:Checking\n",
+    )
+    today = datetime.date(2026, 4, 15)
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # FORECAST-06 doesn't wire a binding (that's FORECAST-07); push
+        # directly, same as BUDGET-03's own screen was tested before
+        # BUDGET-06 added its binding.
+        app.push_screen(ForecastScreen(app.ledger, today=today))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ForecastScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [table.get_row_at(i)[column] for i in range(table.row_count)]
+
+        def row_for(account):
+            accounts = [str(c) for c in cells(0)]
+            return accounts.index(account)
+
+        screen.query_one("#period", Input).value = "2026-04-01..2026-04-30"
+        await pilot.pause()
+
+        # Groceries: budget-only, so Assumed. Actual is the one real
+        # pre-"today" posting (87.35); Projected is the daily 10.00 budget
+        # prorated over the 16 remaining days (04-15..04-30 inclusive).
+        row = row_for("Expenses:Food:Groceries")
+        assert str(cells(2)[row]) == "87.35 USD"
+        projected = cells(3)[row]
+        assert isinstance(projected, Text)
+        assert projected.style  # visually distinguished from Actual
+        assert str(projected) == "160.00 USD (Assumed)"
+        assert str(cells(4)[row]) == "247.35 USD"  # Total = Actual + Projected
+
+        # Rent: template-only, so Explicit. No real Rent activity before
+        # "today" (the template itself is excluded from actual data), and
+        # the template's own 1450.00 instance lands on 2026-04-20.
+        row = row_for("Expenses:Rent")
+        assert str(cells(2)[row]) == "0.00 USD"
+        projected = cells(3)[row]
+        assert isinstance(projected, Text)
+        assert projected.style
+        assert str(projected) == "1,450.00 USD (Explicit)"
+        assert str(cells(4)[row]) == "1,450.00 USD"
+
+        # Assets:Checking (the template's auto-balanced funding leg) blends
+        # a real Actual (-87.35, from the grocery purchase) with an
+        # Explicit Projected (-1,450.00, from the rent instance).
+        row = row_for("Assets:Checking")
+        assert str(cells(2)[row]) == "-87.35 USD"
+        projected = cells(3)[row]
+        assert isinstance(projected, Text)
+        assert str(projected) == "-1,450.00 USD (Explicit)"
+        assert str(cells(4)[row]) == "-1,537.35 USD"
+
+        # The Actual column itself is left as plain, unstyled text -- only
+        # the speculative Projected figures get a style, so the two are
+        # never visually confused.
+        assert not isinstance(cells(2)[row_for("Expenses:Rent")], Text)
+
+        # An invalid period shows an inline error without crashing, and
+        # keeps the last rendered report (matching the other report
+        # screens' behavior).
+        screen.query_one("#period", Input).value = "not-a-range"
+        await pilot.pause()
+        assert str(screen.query_one("#period-error", Static).render()) != ""
+        assert "Expenses:Rent" in [str(c) for c in cells(0)]
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ForecastScreen)
+
+
+async def test_forecast_screen_default_view_projects_forward_without_manual_entry(
+    ledger_path,
+):
+    # No period typed at all: the default view must already project ~3
+    # months forward from "today" rather than requiring the user to type a
+    # future range by hand (FORECAST-06's first acceptance criterion).
+    append_entry(
+        ledger_path,
+        '2026-06-10 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    today = datetime.date(2026, 4, 15)
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(ForecastScreen(app.ledger, today=today))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ForecastScreen)
+
+        table = screen.query_one("#report", DataTable)
+        accounts = [str(table.get_row_at(i)[0]) for i in range(table.row_count)]
+        # 2026-06-10 is within today (04-15) + 3 months (07-15) but outside
+        # a single current-month-style default -- proving the default
+        # window really does reach ~3 months forward on its own.
+        assert "Expenses:Rent" in accounts
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ForecastScreen)
 
 
 async def test_trial_balance_screen(ledger_path):

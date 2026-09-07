@@ -11,6 +11,7 @@ from beancount_tui.ledger import (
     BudgetEntry,
     BudgetReportRow,
     ForecastedActivity,
+    ForecastReportRow,
     Ledger,
     ProjectedTransaction,
     RecurringTemplate,
@@ -1695,3 +1696,99 @@ def test_forecast_covers_template_only_budget_only_and_neither_over_same_window(
 
     # Neither: no rows at all.
     assert "Expenses:Food:Restaurant" not in by_account
+
+
+def test_forecast_report_blends_real_actual_with_projection(ledger_path):
+    # FORECAST-06's fixture: one recurring template (Expenses:Rent, firing
+    # 2026-04-20, after "today") plus one budget (Expenses:Food:Groceries,
+    # 10.00 USD/day), split at a fixed "today" of 2026-04-15 so the
+    # actual/projected boundary is deterministic. A real (non-template)
+    # purchase before "today" proves the "actual" side is genuinely real
+    # posted activity, not more projection.
+    append_entry(
+        ledger_path,
+        '2026-04-20 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n'
+        '2026-04-05 * "Green Grocer" "Early April groceries"\n'
+        "  Expenses:Food:Groceries     87.35 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    today = datetime.date(2026, 4, 15)
+    rows = ledger.forecast_report(
+        datetime.date(2026, 4, 1), datetime.date(2026, 4, 30), today=today
+    )
+    by_account = {(r.account, r.currency): r for r in rows}
+
+    # Budget-only: real 87.35 actual (before today) plus 16 days
+    # (04-15..04-30 inclusive) of the 10.00/day budget fallback, all
+    # "assumed" since no template ever touches this account.
+    groceries = by_account["Expenses:Food:Groceries", "USD"]
+    assert groceries == ForecastReportRow(
+        account="Expenses:Food:Groceries",
+        currency="USD",
+        actual=Decimal("87.35"),
+        projected=Decimal("160.00"),
+        status="assumed",
+        total=Decimal("247.35"),
+    )
+
+    # Template-only: no real Rent activity before today (the template
+    # itself is excluded from actual data), and the template's own
+    # 2026-04-20 instance is "explicit".
+    rent = by_account["Expenses:Rent", "USD"]
+    assert rent == ForecastReportRow(
+        account="Expenses:Rent",
+        currency="USD",
+        actual=Decimal("0"),
+        projected=Decimal("1450.00"),
+        status="explicit",
+        total=Decimal("1450.00"),
+    )
+
+    # The template's auto-balanced funding leg blends a real actual
+    # (-87.35, from the grocery purchase) with an explicit projected
+    # (-1450.00, from the rent instance).
+    checking = by_account["Assets:Checking", "USD"]
+    assert checking == ForecastReportRow(
+        account="Assets:Checking",
+        currency="USD",
+        actual=Decimal("-87.35"),
+        projected=Decimal("-1450.00"),
+        status="explicit",
+        total=Decimal("-1537.35"),
+    )
+
+    # Accounts with neither a template nor a budget don't appear at all.
+    assert ("Expenses:Food:Restaurant", "USD") not in by_account
+
+
+def test_forecast_report_entire_range_before_today_has_no_projected_component(
+    ledger_path,
+):
+    # A range that falls entirely before "today" still resolves the same
+    # account universe (budgets/templates, independent of the window) but
+    # every row is purely "actual" -- there's nothing left to project.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast_report(
+        datetime.date(2026, 1, 1),
+        datetime.date(2026, 1, 31),
+        today=datetime.date(2026, 4, 15),
+    )
+    groceries = next(r for r in rows if r.account == "Expenses:Food:Groceries")
+    # example.beancount's real 87.35 posting on 2026-01-06 is the only
+    # actual activity in this window; no forecast rows since the whole
+    # range predates "today".
+    assert groceries.actual == Decimal("87.35")
+    assert groceries.projected == Decimal("0")
+    assert groceries.status == "actual"
+    assert groceries.total == Decimal("87.35")
