@@ -146,7 +146,7 @@ is implemented: `data.Query` entries are listed in a `Select`.
 
 ### RPT-07: Inline running & cleared balance columns in the main transaction table
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** UX-02
 - **Effort:** 2h
 
@@ -213,22 +213,22 @@ computed dicts, when the single-leaf condition holds) at its existing
 `update_entries` call sites.
 
 **Acceptance criteria:**
-- [ ] Balance column is present and correct for a single leaf account with
+- [x] Balance column is present and correct for a single leaf account with
       the table in its default (untouched) state or either explicit date
       sort, matching `Ledger.register()`'s figures for the same account.
-- [ ] Cleared Balance column, alongside it, reflects only `*`-flagged
+- [x] Cleared Balance column, alongside it, reflects only `*`-flagged
       transactions' cumulative total, under the same visibility rules.
-- [ ] Both columns are absent when no account is selected, when a
+- [x] Both columns are absent when no account is selected, when a
       non-leaf/parent account is selected, or when the table is sorted by
       payee or amount.
-- [ ] Reversing a date sort (asc → desc) keeps each row's balance values
+- [x] Reversing a date sort (asc → desc) keeps each row's balance values
       correct in both columns (i.e. earliest-to-latest cumulative, not
       recomputed against the reversed order) while flipping row order.
-- [ ] `#recurring`-tagged rows and non-`Transaction` directive rows show
+- [x] `#recurring`-tagged rows and non-`Transaction` directive rows show
       blank cells in both columns rather than a stale or incorrect figure.
-- [ ] A non-cleared transaction shows a normal (flag-agnostic) Balance cell
+- [x] A non-cleared transaction shows a normal (flag-agnostic) Balance cell
       but a blank Cleared Balance cell.
-- [ ] Test covering: leaf-account visibility in default/asc/desc date
+- [x] Test covering: leaf-account visibility in default/asc/desc date
       sorts, hidden for parent/no-account/payee/amount-sorted states,
       multi-currency non-mixing, Cleared Balance correctness against a mix
       of `*`/`!`-flagged transactions, and balance correctness under a

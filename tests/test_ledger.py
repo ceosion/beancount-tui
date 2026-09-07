@@ -511,6 +511,116 @@ def test_register_multiple_currencies_kept_separate(tmp_path):
     assert posting_amounts == ["100.00 USD", "50.00 EUR", "20.00 USD"]
 
 
+def test_running_balances_matches_register(ledger_path):
+    # Ledger.running_balances (RPT-07) is a thin reshaping of the same
+    # chronological walk register() uses -- id(transaction)-keyed running
+    # balances should agree exactly, transaction for transaction.
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.register("Assets:Checking")
+    balances = ledger.running_balances("Assets:Checking")
+    txns = ledger.transactions_for_account("Assets:Checking", ledger._actual_transactions)
+    txns = sorted(txns, key=lambda txn: txn.date)
+    assert [format_inventory(balances[id(txn)]) for txn in txns] == [
+        format_inventory(r.running_balance) for r in rows
+    ]
+
+
+def test_running_balances_none_account_returns_empty(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.running_balances("Assets:Nonexistent") == {}
+
+
+def test_running_balances_multiple_currencies_kept_separate(tmp_path):
+    path = tmp_path / "multi-currency.beancount"
+    path.write_text(
+        'option "title" "Multi-currency Ledger"\n'
+        "\n"
+        "2026-01-01 open Assets:Wallet\n"
+        "2026-01-01 open Income:Salary\n"
+        "2026-01-01 open Income:Freelance\n"
+        "\n"
+        '2026-01-02 * "Employer" "USD salary"\n'
+        "  Assets:Wallet    100.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-03 * "Client" "EUR invoice"\n'
+        "  Assets:Wallet     50.00 EUR\n"
+        "  Income:Freelance\n"
+        "\n"
+        '2026-01-04 * "Employer" "USD salary"\n'
+        "  Assets:Wallet     20.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(path)
+    assert not ledger.errors
+    txns = sorted(ledger.transactions_for_account("Assets:Wallet"), key=lambda t: t.date)
+    balances = ledger.running_balances("Assets:Wallet")
+    assert [format_inventory(balances[id(txn)]) for txn in txns] == [
+        "100.00 USD",
+        "50.00 EUR, 100.00 USD",
+        "50.00 EUR, 120.00 USD",
+    ]
+
+
+def test_running_balances_only_cleared_filters_non_cleared_flags(tmp_path):
+    # Cleared Balance (RPT-07) only accumulates "*"-flagged transactions --
+    # a "!" (or any other non-"*") flag contributes to the flag-agnostic
+    # running_balances() but is skipped entirely by only_cleared=True, and
+    # every later cleared balance carries forward as if the "!" row weren't
+    # there.
+    path = tmp_path / "mixed-flags.beancount"
+    path.write_text(
+        'option "title" "Mixed Flags Ledger"\n'
+        "\n"
+        "2026-01-01 open Assets:Checking\n"
+        "2026-01-01 open Income:Salary\n"
+        "\n"
+        '2026-01-01 * "Opening"\n'
+        "  Assets:Checking    100.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-02 ! "Pending deposit"\n'
+        "  Assets:Checking     50.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-03 * "Cleared deposit"\n'
+        "  Assets:Checking     25.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(path)
+    assert not ledger.errors
+    txns = sorted(ledger.transactions_for_account("Assets:Checking"), key=lambda t: t.date)
+    running = ledger.running_balances("Assets:Checking")
+    cleared = ledger.running_balances("Assets:Checking", only_cleared=True)
+    assert [format_inventory(running[id(txn)]) for txn in txns] == [
+        "100.00 USD",
+        "150.00 USD",
+        "175.00 USD",
+    ]
+    # The "!" transaction (index 1) never contributes to Cleared Balance, and
+    # isn't present in the dict at all.
+    assert id(txns[1]) not in cleared
+    assert [format_inventory(cleared[id(txn)]) for txn in (txns[0], txns[2])] == [
+        "100.00 USD",
+        "125.00 USD",
+    ]
+
+
+def test_running_balances_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    balances = ledger.running_balances("Assets:Checking")
+    # The recurring "Rent" template contributes no entry to the dict at all
+    # (its own id() is simply absent, matching register()'s exclusion).
+    recurring_txn = next(
+        t for t in ledger.transactions if "recurring" in (t.tags or set())
+    )
+    assert id(recurring_txn) not in balances
+
+
 def test_run_query_returns_columns_and_rows(ledger_path):
     ledger = Ledger.load(ledger_path)
     result = ledger.run_query("SELECT account, sum(position) AS total GROUP BY account")

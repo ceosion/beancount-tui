@@ -14,10 +14,16 @@ from pathlib import Path
 from typing import Callable, Literal
 
 from beancount.core import data
+from beancount.core.inventory import Inventory
 from rich.text import Text
 from textual.widgets import DataTable
 
-from beancount_tui.ledger import has_user_metadata, transaction_amount, transaction_amount_value
+from beancount_tui.ledger import (
+    format_inventory,
+    has_user_metadata,
+    transaction_amount,
+    transaction_amount_value,
+)
 
 # One color per non-Transaction directive keyword, so a mixed-directive table
 # (with the ``t`` toggle on) stays scannable instead of reading as a wall of
@@ -95,15 +101,34 @@ class TransactionTable(DataTable):
         # account selection, etc.) until explicitly changed by the user.
         self._sort_field: SortField | None = None
         self._sort_reverse: bool = False
+        # RPT-07: running/cleared running balance for the currently selected
+        # single leaf account, keyed by ``id(transaction)`` (see
+        # ``Ledger.running_balances``) -- ``None`` when no such balance is
+        # available (no account selected, a parent/non-leaf account
+        # selected, or "all accounts"). Set via ``update_entries``.
+        self._running_balances: dict[int, Inventory] | None = None
+        self._cleared_balances: dict[int, Inventory] | None = None
+        self._balance_columns_visible: bool = False
 
     def on_mount(self) -> None:
         self.add_columns("Date", "Flag", "Payee", "Narration", "Amount")
 
-    def update_entries(self, entries: list[data.Directive]) -> None:
+    def update_entries(
+        self,
+        entries: list[data.Directive],
+        running_balances: dict[int, Inventory] | None = None,
+        cleared_balances: dict[int, Inventory] | None = None,
+    ) -> None:
         self.clear()
+        self._running_balances = running_balances
+        self._cleared_balances = cleared_balances
         self.shown = self._sorted(entries)
+        self._sync_balance_columns()
         for index, entry in enumerate(self.shown):
-            self.add_row(*_entry_row(entry), key=str(index))
+            row = _entry_row(entry)
+            if self._balance_columns_visible:
+                row = row + self._balance_cells(entry)
+            self.add_row(*row, key=str(index))
         if self.shown:
             self.move_cursor(row=len(self.shown) - 1)
 
@@ -113,6 +138,64 @@ class TransactionTable(DataTable):
         key_func = _SORT_KEYS[self._sort_field]
         return sorted(entries, key=key_func, reverse=self._sort_reverse)
 
+    def _sort_is_date_based(self) -> bool:
+        """Whether the current sort visually reads as date order (RPT-07).
+
+        True for the table's untouched default (``_sort_field is None`` --
+        Beancount's loader already yields entries in date order, so the
+        default view reads as date-ascending even with no sort explicitly
+        chosen) as well as either explicit ``date`` sort direction. False
+        for payee/amount sorts, where a running balance wouldn't visually
+        make sense against the displayed row order.
+        """
+        return self._sort_field is None or self._sort_field == "date"
+
+    def _should_show_balance_columns(self) -> bool:
+        return self._running_balances is not None and self._sort_is_date_based()
+
+    def _sync_balance_columns(self) -> None:
+        """Add/remove the Balance/Cleared Balance columns to match visibility.
+
+        Columns are added/removed from the underlying ``DataTable`` rather
+        than kept always-present with blank cells, so an "all accounts" or
+        non-leaf-account view doesn't carry permanently empty columns.
+        """
+        should_show = self._should_show_balance_columns()
+        if should_show and not self._balance_columns_visible:
+            self.add_column("Balance", key="balance")
+            self.add_column("Cleared Balance", key="cleared_balance")
+            self._balance_columns_visible = True
+        elif not should_show and self._balance_columns_visible:
+            self.remove_column("balance")
+            self.remove_column("cleared_balance")
+            self._balance_columns_visible = False
+
+    def _balance_cells(self, entry: data.Directive) -> tuple[str, str]:
+        """The (Balance, Cleared Balance) cell text for ``entry``.
+
+        Blank for anything that doesn't contribute a running balance:
+        non-``Transaction`` directives, ``#recurring`` templates (already
+        excluded from ``self._running_balances``/``self._cleared_balances``
+        since ``Ledger.running_balances`` walks ``_actual_transactions``),
+        and, for Cleared Balance only, a transaction whose flag isn't
+        ``"*"`` (present in ``self._running_balances`` but absent from
+        ``self._cleared_balances`` -- see ``Ledger.running_balances``'s
+        ``only_cleared`` filter).
+        """
+        if not isinstance(entry, data.Transaction):
+            return "", ""
+        running = ""
+        if self._running_balances is not None:
+            balance = self._running_balances.get(id(entry))
+            if balance is not None:
+                running = format_inventory(balance)
+        cleared = ""
+        if self._cleared_balances is not None:
+            balance = self._cleared_balances.get(id(entry))
+            if balance is not None:
+                cleared = format_inventory(balance)
+        return running, cleared
+
     def _set_sort(self, field: SortField) -> None:
         """Apply ``field`` as the active sort, toggling direction on repeat."""
         if self._sort_field == field:
@@ -120,7 +203,7 @@ class TransactionTable(DataTable):
         else:
             self._sort_field = field
             self._sort_reverse = False
-        self.update_entries(self.shown)
+        self.update_entries(self.shown, self._running_balances, self._cleared_balances)
 
     def action_cycle_sort(self) -> None:
         """Step through ``_SORT_STEPS``: cycling field and, per field, direction."""
@@ -131,7 +214,7 @@ class TransactionTable(DataTable):
         except ValueError:
             next_step = _SORT_STEPS[0]
         self._sort_field, self._sort_reverse = next_step
-        self.update_entries(self.shown)
+        self.update_entries(self.shown, self._running_balances, self._cleared_balances)
 
     def on_data_table_header_selected(self, event: DataTable.HeaderSelected) -> None:
         field = _COLUMN_SORT_FIELDS.get(event.column_index)
