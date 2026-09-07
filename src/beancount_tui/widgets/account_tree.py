@@ -30,12 +30,48 @@ class AccountTree(Tree[str]):
         super().__init__("All accounts", data=None, **kwargs)
         # Node id -> balance text, rendered right-aligned by ``render_label``.
         self._amounts: dict[int, str] = {}
+        # Whether ``update_accounts`` has ever run before. The very first
+        # rebuild (a freshly opened ledger) should start fully expanded;
+        # later rebuilds (reload/filter/selection) should preserve whatever
+        # the user manually collapsed instead of wiping it out.
+        self._loaded = False
 
     def update_accounts(self, real_root: realization.RealAccount, ledger: Ledger) -> None:
+        collapsed_paths: set[str] = set()
+        root_was_collapsed = False
+        if self._loaded:
+            collapsed_paths = self._collapsed_account_paths()
+            root_was_collapsed = not self.root.is_expanded
         self.clear()
         self._amounts.clear()
         self._add_account_nodes(self.root, real_root, ledger)
         self.root.expand()
+        if collapsed_paths:
+            self._restore_collapsed_account_paths(self.root, collapsed_paths)
+        if root_was_collapsed:
+            self.root.collapse()
+        self._loaded = True
+
+    def _collapsed_account_paths(self) -> set[str]:
+        """Account names of every currently-collapsed node, before a rebuild."""
+        paths: set[str] = set()
+
+        def visit(node: TreeNode) -> None:
+            if node.data is not None and not node.is_expanded:
+                paths.add(node.data)
+            for child in node.children:
+                visit(child)
+
+        visit(self.root)
+        return paths
+
+    def _restore_collapsed_account_paths(self, node: TreeNode, paths: set[str]) -> None:
+        """Re-collapse nodes (added expanded by ``_add_account_nodes``) whose
+        account name was collapsed before the rebuild."""
+        for child in node.children:
+            if child.data in paths:
+                child.collapse()
+            self._restore_collapsed_account_paths(child, paths)
 
     def _add_account_nodes(
         self, node: TreeNode, real_account: realization.RealAccount, ledger: Ledger

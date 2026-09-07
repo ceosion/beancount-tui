@@ -238,7 +238,7 @@ computed dicts, when the single-leaf condition holds) at its existing
 
 ### RPT-08: Collapsible account tree
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -257,14 +257,14 @@ Fix by snapshotting which account paths are currently collapsed before
 adding new collapse machinery.
 
 **Acceptance criteria:**
-- [ ] Collapsing a node in the sidebar survives a ledger reload, filter
+- [x] Collapsing a node in the sidebar survives a ledger reload, filter
       change, or account selection (previously-collapsed accounts stay
       collapsed).
-- [ ] A freshly loaded ledger still starts fully expanded (first-load
+- [x] A freshly loaded ledger still starts fully expanded (first-load
       default is unchanged).
-- [ ] Existing `space`/`shift+space` collapse/expand bindings continue to
+- [x] Existing `space`/`shift+space` collapse/expand bindings continue to
       work.
-- [ ] Test covering: collapse an account, trigger `update_accounts` again
+- [x] Test covering: collapse an account, trigger `update_accounts` again
       (simulating a reload), assert it's still collapsed.
 
 ---
