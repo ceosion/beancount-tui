@@ -30,6 +30,7 @@ from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.pad_source_picker import PadSourcePicker
+from beancount_tui.widgets.price_history import PriceHistoryScreen
 from beancount_tui.widgets.query_runner import QueryRunnerScreen
 from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm
@@ -2796,6 +2797,60 @@ async def test_holdings_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, HoldingsScreen)
+
+
+async def test_price_history_screen(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        "2026-02-01 price HOOL  550.00 USD\n"
+        "2026-03-01 price HOOL  600.25 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("P")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PriceHistoryScreen)
+
+        # HOOL has price history and is offered (and selected by default);
+        # the example ledger's other commodities (USD only) have none, so
+        # only HOOL shows up in the picker.
+        select = screen.query_one("#commodity", Select)
+        assert [value for _, value in select._options] == ["HOOL"]
+        assert select.value == "HOOL"
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        assert cells(0) == ["2026-02-01", "2026-03-01"]
+        assert cells(1) == ["550.00", "600.25"]
+        assert cells(2) == ["USD", "USD"]
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, PriceHistoryScreen)
+
+
+async def test_price_history_screen_no_priced_commodities(ledger_path):
+    # The example ledger has no Price directives at all.
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("P")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, PriceHistoryScreen)
+        assert len(screen.query(Select)) == 0
+        assert "No commodities have Price directives." in str(
+            screen.query_one("#empty", Static).render()
+        )
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, PriceHistoryScreen)
 
 
 async def test_ledger_info_screen(ledger_path):

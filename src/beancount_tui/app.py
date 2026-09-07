@@ -43,6 +43,7 @@ from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.income_statement import IncomeStatementScreen
 from beancount_tui.widgets.ledger_info import LedgerInfoScreen
 from beancount_tui.widgets.pad_source_picker import PadSourcePicker
+from beancount_tui.widgets.price_history import PriceHistoryScreen
 from beancount_tui.widgets.query_runner import QueryRunnerScreen
 from beancount_tui.widgets.register import RegisterScreen
 from beancount_tui.widgets.transaction_form import TransactionForm, TransactionFormResult
@@ -195,6 +196,7 @@ class BeancountTUI(App):
         ("G", "budget", "Budget vs actual"),
         ("F", "forecast", "Cash-flow forecast"),
         ("w", "holdings", "Holdings"),
+        ("P", "price_history", "Price history"),
         ("L", "ledger_info", "Ledger info"),
         ("Q", "query_runner", "Query"),
         ("m", "import_csv", "Import CSV"),
@@ -345,6 +347,9 @@ class BeancountTUI(App):
 
     def action_holdings(self) -> None:
         self.push_screen(HoldingsScreen(self.ledger))
+
+    def action_price_history(self) -> None:
+        self.push_screen(PriceHistoryScreen(self.ledger))
 
     def action_ledger_info(self) -> None:
         self.push_screen(LedgerInfoScreen(self.ledger))
