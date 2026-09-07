@@ -117,7 +117,7 @@ logic — no separate form or duplicated postings editor.
 
 ### FORECAST-04: Projection engine (virtual instance generation)
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-01
 - **Effort:** 2h
 
@@ -131,14 +131,14 @@ transaction) — never constructed as parseable Beancount text, never
 appended anywhere.
 
 **Acceptance criteria:**
-- [ ] A monthly template generates one instance per calendar month in the
+- [x] A monthly template generates one instance per calendar month in the
       requested range, correctly handling month-length variation (e.g. a
       template dated the 31st doesn't skip or crash in February).
-- [ ] A template with `recurring-until` stops generating instances after
+- [x] A template with `recurring-until` stops generating instances after
       that date, even if the requested range extends further.
-- [ ] Templates starting after the requested range's start only generate
+- [x] Templates starting after the requested range's start only generate
       instances from their own first occurrence onward.
-- [ ] Test covering monthly/quarterly/yearly generation across a
+- [x] Test covering monthly/quarterly/yearly generation across a
       multi-month range, plus the `recurring-until` cutoff.
 
 ---
