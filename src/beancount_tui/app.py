@@ -15,7 +15,12 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Static
 
-from beancount_tui.config import DEFAULT_WATCH_INTERVAL, default_config_path, load_config
+from beancount_tui.config import (
+    DEFAULT_WATCH_INTERVAL,
+    default_config_path,
+    load_config,
+    resolve_bindings,
+)
 from beancount_tui.editor import (
     append_entry,
     delete_entry,
@@ -135,6 +140,74 @@ class UndoManager:
         self._undo.append((path, content))
 
 
+# The hardcoded default key bindings, kept as a module-level constant
+# (rather than only living as `BeancountTUI.BINDINGS`) so `CONFIG-02`'s
+# `main()`-time rebuild always has the *true* defaults to apply overrides
+# on top of -- even if `main()` (or a test) runs more than once in the same
+# process and `BeancountTUI.BINDINGS` has already been overwritten by a
+# previous call to `_rebuild_bindings`.
+_DEFAULT_BINDINGS: list[tuple[str, str, str]] = [
+    ("n", "new_transaction", "New"),
+    ("a", "add_directive", "Add directive"),
+    ("e", "edit_transaction", "Edit"),
+    ("c", "duplicate_transaction", "Duplicate"),
+    ("d", "delete_transaction", "Delete"),
+    ("f", "cycle_flag", "Cycle flag"),
+    ("t", "toggle_directives", "Directives"),
+    ("v", "toggle_detail", "Detail"),
+    ("u", "undo", "Undo"),
+    ("U", "redo", "Redo"),
+    ("i", "income_statement", "Income stmt"),
+    ("b", "trial_balance", "Trial balance"),
+    ("B", "balance_directive", "Balance now"),
+    ("p", "pad_and_verify", "Pad and verify"),
+    ("P", "preview_document", "Preview document"),
+    ("g", "register", "Register"),
+    ("s", "balance_sheet", "Balance sheet"),
+    ("G", "budget", "Budget vs actual"),
+    ("F", "forecast", "Cash-flow forecast"),
+    ("w", "holdings", "Holdings"),
+    ("H", "price_history", "Price history"),
+    ("L", "ledger_info", "Ledger info"),
+    ("Q", "query_runner", "Query"),
+    ("m", "import_csv", "Import CSV"),
+    ("M", "import_beangulp", "Import (beangulp)"),
+    ("/", "filter", "Filter"),
+    ("r", "reload", "Reload"),
+    ("q", "quit", "Quit"),
+    ("question_mark", "help", "Help"),
+]
+
+
+def _rebuild_bindings(app_cls: type, overrides: dict[str, object]) -> None:
+    """Apply `CONFIG-02`'s `[bindings]` config-file overrides to `app_cls`
+    (normally `BeancountTUI`) *before* it's instantiated.
+
+    This must run before construction: Textual resolves `BINDINGS` into a
+    cached `cls._merged_bindings` exactly once, in `DOMNode.__init_subclass__`
+    at class-definition (i.e. module-import) time, and every instance's
+    actual key-dispatch table is built from that cache in `__init__` --
+    simply reassigning `app_cls.BINDINGS` afterwards has no effect on key
+    dispatch by itself. Recomputing `app_cls._merged_bindings` via the
+    private `_merge_bindings()` classmethod (confirmed by direct testing
+    against the installed Textual version to pick up a reassigned `BINDINGS`
+    correctly) is what actually makes overrides take effect. There's no
+    public Textual API for this because remapping an app's whole bindings
+    table at runtime isn't a case Textual itself anticipates -- its
+    supported `refresh_bindings()` is for enabling/disabling *existing*
+    bindings via `check_action`, not changing which key maps to which
+    action.
+
+    The `hasattr` guard below is only there for tests that substitute a
+    plain (non-Textual) recording stand-in for `BeancountTUI` -- such a
+    stand-in has no `_merge_bindings` to refresh, but still gets its
+    `BINDINGS` attribute set for inspection.
+    """
+    app_cls.BINDINGS = resolve_bindings(_DEFAULT_BINDINGS, overrides)
+    if hasattr(app_cls, "_merge_bindings"):
+        app_cls._merged_bindings = app_cls._merge_bindings()
+
+
 class BeancountTUI(App):
     """Browse and edit a Beancount ledger."""
 
@@ -176,37 +249,7 @@ class BeancountTUI(App):
     }
     """
 
-    BINDINGS = [
-        ("n", "new_transaction", "New"),
-        ("a", "add_directive", "Add directive"),
-        ("e", "edit_transaction", "Edit"),
-        ("c", "duplicate_transaction", "Duplicate"),
-        ("d", "delete_transaction", "Delete"),
-        ("f", "cycle_flag", "Cycle flag"),
-        ("t", "toggle_directives", "Directives"),
-        ("v", "toggle_detail", "Detail"),
-        ("u", "undo", "Undo"),
-        ("U", "redo", "Redo"),
-        ("i", "income_statement", "Income stmt"),
-        ("b", "trial_balance", "Trial balance"),
-        ("B", "balance_directive", "Balance now"),
-        ("p", "pad_and_verify", "Pad and verify"),
-        ("P", "preview_document", "Preview document"),
-        ("g", "register", "Register"),
-        ("s", "balance_sheet", "Balance sheet"),
-        ("G", "budget", "Budget vs actual"),
-        ("F", "forecast", "Cash-flow forecast"),
-        ("w", "holdings", "Holdings"),
-        ("H", "price_history", "Price history"),
-        ("L", "ledger_info", "Ledger info"),
-        ("Q", "query_runner", "Query"),
-        ("m", "import_csv", "Import CSV"),
-        ("M", "import_beangulp", "Import (beangulp)"),
-        ("/", "filter", "Filter"),
-        ("r", "reload", "Reload"),
-        ("q", "quit", "Quit"),
-        ("question_mark", "help", "Help"),
-    ]
+    BINDINGS = _DEFAULT_BINDINGS
 
     def __init__(
         self, ledger_path: str | Path, watch_interval: float = DEFAULT_WATCH_INTERVAL
@@ -1143,6 +1186,12 @@ def main() -> None:
 
     if not Path(ledger).is_file():
         sys.exit(f"error: no such file: {ledger}")
+
+    # Rebuild BINDINGS from any `[bindings]` config-file overrides before
+    # constructing the app -- see `_rebuild_bindings` for why this must
+    # happen here, prior to `BeancountTUI(...)` below, rather than after.
+    _rebuild_bindings(BeancountTUI, config.get("bindings", {}))
+
     BeancountTUI(ledger, watch_interval=watch_interval).run()
 
 

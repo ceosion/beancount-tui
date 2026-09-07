@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 
 from beancount_tui import app
-from beancount_tui.config import load_config
+from beancount_tui.config import load_config, resolve_bindings
 
 
 def test_load_config_missing_file_returns_empty(tmp_path: Path) -> None:
@@ -37,6 +37,52 @@ def test_load_config_malformed_file_exits_with_clear_message(tmp_path: Path) -> 
     config_path.write_text("this is not valid toml [[[", encoding="utf-8")
     with pytest.raises(SystemExit, match="invalid config file"):
         load_config(config_path)
+
+
+_SAMPLE_BINDINGS = [
+    ("n", "new_transaction", "New"),
+    ("e", "edit_transaction", "Edit"),
+    ("q", "quit", "Quit"),
+]
+
+
+def test_resolve_bindings_remaps_action_to_new_key() -> None:
+    """A key binding can be remapped via the config file (`CONFIG-02`)."""
+    resolved = resolve_bindings(_SAMPLE_BINDINGS, {"new_transaction": "ctrl+n"})
+    assert ("ctrl+n", "new_transaction", "New") in resolved
+    assert not any(action == "new_transaction" and key == "n" for key, action, _ in resolved)
+
+
+def test_resolve_bindings_keeps_unmapped_actions_at_default_key() -> None:
+    resolved = resolve_bindings(_SAMPLE_BINDINGS, {"new_transaction": "ctrl+n"})
+    assert ("e", "edit_transaction", "Edit") in resolved
+    assert ("q", "quit", "Quit") in resolved
+
+
+def test_resolve_bindings_no_overrides_returns_defaults_unchanged() -> None:
+    assert resolve_bindings(_SAMPLE_BINDINGS, {}) == _SAMPLE_BINDINGS
+
+
+def test_resolve_bindings_conflicting_keys_rejected() -> None:
+    """Two actions ending up on the same key is a clear startup error, not
+    silent shadowing."""
+    with pytest.raises(SystemExit, match="conflicting"):
+        resolve_bindings(_SAMPLE_BINDINGS, {"new_transaction": "q"})
+
+
+def test_resolve_bindings_unknown_action_rejected() -> None:
+    with pytest.raises(SystemExit, match="unknown action"):
+        resolve_bindings(_SAMPLE_BINDINGS, {"not_a_real_action": "ctrl+n"})
+
+
+def test_resolve_bindings_non_dict_overrides_rejected() -> None:
+    with pytest.raises(SystemExit, match="must be a table"):
+        resolve_bindings(_SAMPLE_BINDINGS, "not-a-table")  # type: ignore[arg-type]
+
+
+def test_resolve_bindings_non_string_key_rejected() -> None:
+    with pytest.raises(SystemExit, match="must be a string key"):
+        resolve_bindings(_SAMPLE_BINDINGS, {"new_transaction": 123})  # type: ignore[dict-item]
 
 
 class _RecordingApp:
@@ -156,3 +202,51 @@ def test_main_explicit_config_flag_overrides_default_location(
 
     assert len(recording_app.instances) == 1
     assert recording_app.instances[0].ledger_path == str(ledger_path)
+
+
+def test_main_applies_bindings_override_from_config_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_app: type[_RecordingApp],
+    ledger_path: Path,
+) -> None:
+    """`CONFIG-02`: a `[bindings]` table in the config file is applied to
+    the app class's `BINDINGS` before it's constructed, and actions not
+    named in it keep their hardcoded default key."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'default_ledger = "{ledger_path}"\n\n[bindings]\nnew_transaction = "ctrl+n"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app, "default_config_path", lambda: config_path)
+    monkeypatch.setattr("sys.argv", ["beancount-tui"])
+
+    app.main()
+
+    assert len(recording_app.instances) == 1
+    resolved = {action: key for key, action, _desc in recording_app.BINDINGS}
+    assert resolved["new_transaction"] == "ctrl+n"
+    assert resolved["quit"] == "q"
+
+
+def test_main_rejects_conflicting_bindings_config(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_app: type[_RecordingApp],
+    ledger_path: Path,
+) -> None:
+    """Remapping `new_transaction` onto `quit`'s default key `q` is a
+    startup error, not silent shadowing -- and the app never gets
+    constructed."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        f'default_ledger = "{ledger_path}"\n\n[bindings]\nnew_transaction = "q"\n',
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(app, "default_config_path", lambda: config_path)
+    monkeypatch.setattr("sys.argv", ["beancount-tui"])
+
+    with pytest.raises(SystemExit, match="conflicting"):
+        app.main()
+
+    assert recording_app.instances == []
