@@ -94,7 +94,7 @@ class BudgetForm(ModalScreen[DirectiveFormResult | None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label('[b]New budget[/b]')
-            yield Label("Date", classes="field-label")
+            yield Label("Date (ctrl+g opens date picker)", classes="field-label")
             yield DateInput(value=self._date, id="date", placeholder="YYYY-MM-DD")
             yield Label("Account (Tab completes)", classes="field-label")
             yield AccountInput(

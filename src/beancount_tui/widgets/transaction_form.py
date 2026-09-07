@@ -149,7 +149,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label(f"[b]{self._title}[/b]")
-            yield Label("Date", classes="field-label")
+            yield Label("Date (ctrl+g opens date picker)", classes="field-label")
             yield DateInput(value=self._date, id="date", placeholder="YYYY-MM-DD")
             yield Label("Flag (* = cleared, ! = pending)", classes="field-label")
             yield Input(value=self._flag, id="flag")

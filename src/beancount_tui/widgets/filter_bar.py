@@ -13,7 +13,7 @@ class FilterBar(DateRangeInput):
 
     Posts :class:`FilterChanged` on every keystroke, :class:`FilterAccepted`
     on Enter (keep the filter, leave the bar), and :class:`FilterClosed` on
-    Escape (drop the filter). Also inherits `DateRangeInput`'s `ctrl+p`
+    Escape (drop the filter). Also inherits `DateRangeInput`'s `ctrl+g`
     calendar picker (UX-06) for the `YYYY-MM-DD..YYYY-MM-DD` range half of
     its syntax; a plain text filter or a preset token (``month``, etc.) is
     unaffected.
