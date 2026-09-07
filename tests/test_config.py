@@ -46,9 +46,17 @@ class _RecordingApp:
 
     instances: list["_RecordingApp"] = []
 
-    def __init__(self, ledger_path: str | Path, watch_interval: float = app.DEFAULT_WATCH_INTERVAL):
+    def __init__(
+        self,
+        ledger_path: str | Path,
+        watch_interval: float = app.DEFAULT_WATCH_INTERVAL,
+        theme: str | None = None,
+        config_path: Path | None = None,
+    ):
         self.ledger_path = ledger_path
         self.watch_interval = watch_interval
+        self.theme = theme
+        self.config_path = config_path
         _RecordingApp.instances.append(self)
 
     def run(self) -> None:
@@ -156,3 +164,41 @@ def test_main_explicit_config_flag_overrides_default_location(
 
     assert len(recording_app.instances) == 1
     assert recording_app.instances[0].ledger_path == str(ledger_path)
+
+
+def test_main_passes_configured_theme_and_resolved_config_path_to_app(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_app: type[_RecordingApp],
+    ledger_path: Path,
+) -> None:
+    """`CONFIG-03`: `main()` reads a `theme` key from the config file and
+    passes it through to `BeancountTUI`, along with the config path that was
+    actually resolved for this run (the explicit `--config` value here) --
+    that's the file a later theme change needs to be written back to."""
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'default_ledger = "{ledger_path}"\ntheme = "nord"\n', encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["beancount-tui", "--config", str(config_path)])
+
+    app.main()
+
+    assert len(recording_app.instances) == 1
+    instance = recording_app.instances[0]
+    assert instance.theme == "nord"
+    assert instance.config_path == config_path
+
+
+def test_main_with_no_theme_in_config_passes_none(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    recording_app: type[_RecordingApp],
+    ledger_path: Path,
+) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(f'default_ledger = "{ledger_path}"\n', encoding="utf-8")
+    monkeypatch.setattr("sys.argv", ["beancount-tui", "--config", str(config_path)])
+
+    app.main()
+
+    assert len(recording_app.instances) == 1
+    assert recording_app.instances[0].theme is None
