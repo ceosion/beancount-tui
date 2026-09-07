@@ -124,6 +124,30 @@ def test_transactions_for_account_none_returns_all(ledger_path):
     assert ledger.transactions_for_account(None) == ledger.transactions
 
 
+def test_payees_property_distinct_and_sorted(completions_ledger_path):
+    ledger = Ledger.load(completions_ledger_path)
+    assert ledger.payees == ["Landlord", "Lively Bistro"]
+
+
+def test_narrations_property_most_recently_used_first(completions_ledger_path):
+    ledger = Ledger.load(completions_ledger_path)
+    # Distinct narrations, most-recently-dated transaction first -- feeds
+    # NarrationInput's "recently used" suggestion ordering (UX-07).
+    assert ledger.narrations == [
+        "Dinner with friends",
+        "February rent",
+        "January rent",
+    ]
+
+
+def test_tags_property_includes_non_transaction_directive_tags(completions_ledger_path):
+    ledger = Ledger.load(completions_ledger_path)
+    # "ledger-only-tag" is only ever attached to the `note` directive above,
+    # never a transaction -- still picked up (UX-07's "including tags used
+    # only on non-transaction directives" case).
+    assert ledger.tags == ["housing", "ledger-only-tag", "leisure"]
+
+
 def test_trial_balance_all_accounts(ledger_path):
     ledger = Ledger.load(ledger_path)
     balances = {a: format_inventory(b) for a, b in ledger.trial_balance()}

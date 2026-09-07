@@ -19,8 +19,11 @@ from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
 from beancount_tui.widgets.budget_form import INTERVALS
 from beancount_tui.widgets.date_input import DateInput
+from beancount_tui.widgets.narration_input import NarrationInput
+from beancount_tui.widgets.payee_input import PayeeInput
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.structured_postings import StructuredPostingsArea
+from beancount_tui.widgets.tags_input import TagsInput
 
 
 @dataclass
@@ -96,6 +99,9 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         title: str = "New transaction",
         files: list[Path] | None = None,
         accounts: list[str] | None = None,
+        payees: list[str] | None = None,
+        narrations: list[str] | None = None,
+        tags: list[str] | None = None,
         recurring: bool = False,
         recurring_interval: str = "monthly",
         recurring_until: str = "",
@@ -103,6 +109,14 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
     ) -> None:
         super().__init__()
         self._accounts = accounts or []
+        # UX-07: Tab-/suggestion-completion candidates for the Payee,
+        # Narration, and Tags fields, mirroring how `accounts` above feeds
+        # `PostingsArea`/`AccountInput`. All three are optional so existing
+        # callers (and tests) that don't pass them still get a form -- just
+        # with nothing to complete against.
+        self._payees = payees or []
+        self._narrations = narrations or []
+        self._tags = tags or []
         self._date = date or datetime.date.today().isoformat()
         self._flag = flag
         self._payee = payee
@@ -138,12 +152,19 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield DateInput(value=self._date, id="date", placeholder="YYYY-MM-DD")
             yield Label("Flag (* = cleared, ! = pending)", classes="field-label")
             yield Input(value=self._flag, id="flag")
-            yield Label("Payee", classes="field-label")
-            yield Input(value=self._payee, id="payee", placeholder="(optional)")
-            yield Label("Narration", classes="field-label")
-            yield Input(value=self._narration, id="narration")
-            yield Label("Tags / links (e.g. #vacation ^receipt-123)", classes="field-label")
-            yield Input(value=self._tags_links, id="tags_links", placeholder="(optional)")
+            yield Label("Payee (Tab completes known payees)", classes="field-label")
+            yield PayeeInput(
+                value=self._payee, id="payee", placeholder="(optional)", payees=self._payees
+            )
+            yield Label("Narration (suggestions from prior entries)", classes="field-label")
+            yield NarrationInput(self._narration, narrations=self._narrations, input_id="narration")
+            yield Label(
+                "Tags / links (e.g. #vacation ^receipt-123; Tab completes tags)",
+                classes="field-label",
+            )
+            yield TagsInput(
+                value=self._tags_links, id="tags_links", placeholder="(optional)", tags=self._tags
+            )
             yield Checkbox("Recurring template", value=self._recurring, id="recurring")
             interval_label = Label(
                 "Recurring interval", classes="field-label", id="recurring-interval-label"

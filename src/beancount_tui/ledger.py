@@ -587,6 +587,57 @@ class Ledger:
         return sorted(getters.get_accounts(self.entries))
 
     @property
+    def payees(self) -> list[str]:
+        """Distinct payees used across the ledger's transactions, sorted.
+
+        Feeds ``PayeeInput``'s Tab-completion (``UX-07``) for the Payee
+        field, the same longest-common-prefix completion ``AccountInput``
+        already uses for account names. Mirrors ``accounts`` in scanning
+        ``self.transactions`` (not ``_actual_transactions``), so a
+        ``#recurring`` template's payee is still offered.
+        """
+        return sorted({txn.payee for txn in self.transactions if txn.payee})
+
+    @property
+    def narrations(self) -> list[str]:
+        """Distinct narrations used across the ledger's transactions, most
+        recently used first.
+
+        Unlike ``payees``/``tags`` -- exact candidates for forced
+        longest-common-prefix completion -- narration is free text:
+        ``NarrationInput`` (``UX-07``) uses this ordering to show a
+        "recently used" prefix-matched suggestion list instead of forcing a
+        single completion, so a narration typed more recently ranks above
+        one typed long ago even if both match what's being typed. Ties
+        (same date) keep their original ``self.transactions`` relative
+        order.
+        """
+        seen: dict[str, None] = {}
+        for txn in sorted(self.transactions, key=lambda t: t.date, reverse=True):
+            if txn.narration and txn.narration not in seen:
+                seen[txn.narration] = None
+        return list(seen)
+
+    @property
+    def tags(self) -> list[str]:
+        """Distinct tags used anywhere in the ledger, sorted.
+
+        Feeds ``TagsInput``'s Tab-completion (``UX-07``) for the Tags /
+        links field. Beancount's data model puts a ``tags`` field not just
+        on ``Transaction`` but also on ``Note`` and ``Document`` (the only
+        three directive types that carry one) -- all of ``self.entries`` is
+        scanned via ``getattr(entry, "tags", None)`` rather than just
+        ``self.transactions``, so a tag applied only to e.g. a ``document``
+        directive still completes here.
+        """
+        tags: set[str] = set()
+        for entry in self.entries:
+            entry_tags = getattr(entry, "tags", None)
+            if entry_tags:
+                tags.update(entry_tags)
+        return sorted(tags)
+
+    @property
     def directives(self) -> list[data.Directive]:
         """All entries of the types the UI displays, transactions included."""
         return [e for e in self.entries if isinstance(e, DISPLAYED_DIRECTIVES)]

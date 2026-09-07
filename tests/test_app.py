@@ -25,6 +25,8 @@ from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
 from beancount_tui.widgets.structured_postings import PostingsRow, StructuredPostingsArea
+from beancount_tui.widgets.payee_input import PayeeInput
+from beancount_tui.widgets.tags_input import TagsInput
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.forecast_screen import ForecastScreen
 from beancount_tui.widgets.help_screen import HelpScreen
@@ -993,6 +995,107 @@ async def test_account_completion_in_postings(ledger_path):
         area.cursor_location = (0, 17)
         await pilot.press("tab")
         assert area.text == "Expenses:Rent  14"
+
+
+async def test_payee_completion_in_transaction_form(completions_ledger_path):
+    """UX-07: the Payee field Tab-completes against payees already used
+    in the ledger, the same longest-common-prefix rule `AccountInput` uses
+    for accounts (see `test_account_completion_in_postings` above)."""
+    app = BeancountTUI(completions_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        payee = app.screen.query_one("#payee", PayeeInput)
+        payee.focus()
+
+        # A unique match completes fully.
+        payee.value = "La"
+        payee.cursor_position = 2
+        await pilot.press("tab")
+        assert payee.value == "Landlord"
+
+        # No match: Tab is unaffected, same fallback as `AccountInput`.
+        payee.value = "Zzz"
+        payee.cursor_position = 3
+        await pilot.press("tab")
+        assert payee.value == "Zzz"
+
+
+async def test_tags_completion_in_transaction_form(completions_ledger_path):
+    """UX-07: the Tags/links field Tab-completes the `#tag` token under the
+    cursor against tags already used in the ledger -- including a tag used
+    only on a `note` directive, never a transaction (see
+    `test_tags_property_includes_non_transaction_directive_tags` in
+    `test_ledger.py` for the underlying `Ledger.tags` behavior)."""
+    app = BeancountTUI(completions_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        tags = app.screen.query_one("#tags_links", TagsInput)
+        tags.focus()
+
+        # A tag used only on a non-transaction directive still completes.
+        tags.value = "#ledg"
+        tags.cursor_position = len(tags.value)
+        await pilot.press("tab")
+        assert tags.value == "#ledger-only-tag"
+
+        # Completion targets the token under the cursor, not the whole
+        # field -- a token after other already-typed tokens still
+        # completes on its own.
+        tags.value = "#leisure #hou"
+        tags.cursor_position = len(tags.value)
+        await pilot.press("tab")
+        assert tags.value == "#leisure #housing"
+
+        # A "^link" token (or any non-"#" text) is left alone: Tab keeps
+        # its default behavior.
+        tags.value = "^receipt-123"
+        tags.cursor_position = len(tags.value)
+        await pilot.press("tab")
+        assert tags.value == "^receipt-123"
+
+        # No match: Tab is unaffected, same fallback as `AccountInput`.
+        tags.value = "#zzz"
+        tags.cursor_position = len(tags.value)
+        await pilot.press("tab")
+        assert tags.value == "#zzz"
+
+
+async def test_narration_suggestions_in_transaction_form(completions_ledger_path):
+    """UX-07: the Narration field offers prefix-matched suggestions from
+    prior narrations (most recently used first) without forcing a
+    completion -- unlike Payee/Tags, typing never overwrites what the user
+    typed; a suggestion is only applied if explicitly accepted with Tab."""
+    app = BeancountTUI(completions_ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        narration = form.query_one("#narration", Input)
+        suggestions = form.query_one("#narration-suggestions", OptionList)
+        narration.focus()
+
+        # Typing narrows a suggestion list without touching the typed text.
+        narration.value = "Jan"
+        await pilot.pause()
+        assert narration.value == "Jan"
+        assert [str(option.prompt) for option in suggestions.options] == ["January rent"]
+        assert suggestions.has_class("-visible")
+
+        # Tab accepts the highlighted suggestion, replacing the field's
+        # text, and hides the list again.
+        await pilot.press("tab")
+        assert narration.value == "January rent"
+        await pilot.pause()
+        assert not suggestions.has_class("-visible")
+
+        # No match: Tab is unaffected, same fallback as `AccountInput`.
+        narration.value = "Zzz"
+        await pilot.pause()
+        assert not suggestions.has_class("-visible")
+        await pilot.press("tab")
+        assert narration.value == "Zzz"
 
 
 async def test_duplicate_transaction(ledger_path):
