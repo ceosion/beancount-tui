@@ -10,6 +10,7 @@ from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
     BudgetEntry,
     BudgetReportRow,
+    ForecastedActivity,
     Ledger,
     ProjectedTransaction,
     RecurringTemplate,
@@ -847,6 +848,31 @@ def test_budget_report_tracks_currencies_as_separate_rows(ledger_path):
     assert by_currency["EUR"].actual == Decimal("0")
 
 
+def test_budget_report_excludes_recurring_template_from_actual(ledger_path):
+    # Regression test for _account_currency_activity, which previously
+    # iterated self.transactions instead of self._actual_transactions: a
+    # #recurring template transaction is projection data (FORECAST-01), not
+    # something that happened, and FORECAST-02 excludes it from every
+    # actual-data view -- this report's "Actual" column is one of those
+    # views too.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Rent "monthly" 310.00 USD\n'
+        '2026-01-20 * "Landlord" "Extra rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      50000.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.budget_report(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
+    row = next(r for r in rows if r.account == "Expenses:Rent")
+    # example.beancount's real 2026-01-10 rent posting is 1450.00 USD; if the
+    # 50,000.00 template posting were wrongly counted, actual would instead
+    # be 51,450.00.
+    assert row.actual == Decimal("1450.00")
+
+
 def test_budget_report_rolled_up_sums_siblings_into_shared_parent(ledger_path):
     # example.beancount's 3-level hierarchy: Expenses:Food:Groceries and
     # Expenses:Food:Restaurant are sibling leaves under Expenses:Food, which
@@ -1509,3 +1535,163 @@ def test_project_recurring_covers_multiple_templates_independently(ledger_path):
         datetime.date(2026, 3, 1),
     ]
     assert premium_dates == [datetime.date(2026, 1, 15)]
+
+
+# FORECAST-05: Ledger.forecast blends explicit template instances with
+# budget-fallback figures for accounts a template doesn't cover on a given
+# day. The window below (April, chosen to stay clear of example.beancount's
+# January actuals) is reused across these tests so template-only,
+# budget-only, and neither-only accounts can be checked side by side.
+
+
+def test_forecast_empty_when_no_templates_or_budgets(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 30)) == []
+
+
+def test_forecast_template_only_produces_explicit_rows(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-04-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 30))
+
+    rent_rows = [r for r in rows if r.account == "Expenses:Rent"]
+    assert rent_rows == [
+        ForecastedActivity(
+            date=datetime.date(2026, 4, 1),
+            account="Expenses:Rent",
+            currency="USD",
+            amount=Decimal("1450.00"),
+            explicit=True,
+        )
+    ]
+
+    # The auto-balancing Assets:Checking leg is interpolated to a concrete
+    # amount by the loader, and shows up as its own explicit row too.
+    checking_rows = [r for r in rows if r.account == "Assets:Checking"]
+    assert checking_rows == [
+        ForecastedActivity(
+            date=datetime.date(2026, 4, 1),
+            account="Assets:Checking",
+            currency="USD",
+            amount=Decimal("-1450.00"),
+            explicit=True,
+        )
+    ]
+
+
+def test_forecast_budget_only_produces_assumed_rows_for_every_day(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 5))
+
+    groceries_rows = [r for r in rows if r.account == "Expenses:Food:Groceries"]
+    assert [r.date for r in groceries_rows] == [
+        datetime.date(2026, 4, 1),
+        datetime.date(2026, 4, 2),
+        datetime.date(2026, 4, 3),
+        datetime.date(2026, 4, 4),
+        datetime.date(2026, 4, 5),
+    ]
+    assert all(r.amount == Decimal("10.00") for r in groceries_rows)
+    assert all(r.explicit is False for r in groceries_rows)
+    assert all(r.currency == "USD" for r in groceries_rows)
+
+
+def test_forecast_account_with_neither_template_nor_budget_projects_nothing(ledger_path):
+    # Expenses:Food:Restaurant has no budget or recurring template anywhere
+    # in example.beancount.
+    append_entry(
+        ledger_path,
+        '2026-04-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 30))
+    assert [r for r in rows if r.account == "Expenses:Food:Restaurant"] == []
+
+
+def test_forecast_template_day_does_not_also_draw_budget_fallback(ledger_path):
+    # Expenses:Rent has both a monthly template (firing on the 1st) and a
+    # daily budget -- the template's day must not also carry a
+    # budget-fallback row, but every other day in the window still should.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Rent "daily" 5.00 USD\n'
+        '2026-04-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 5))
+    rent_rows = sorted(
+        (r for r in rows if r.account == "Expenses:Rent"), key=lambda r: r.date
+    )
+    assert [(r.date, r.amount, r.explicit) for r in rent_rows] == [
+        (datetime.date(2026, 4, 1), Decimal("1450.00"), True),
+        (datetime.date(2026, 4, 2), Decimal("5.00"), False),
+        (datetime.date(2026, 4, 3), Decimal("5.00"), False),
+        (datetime.date(2026, 4, 4), Decimal("5.00"), False),
+        (datetime.date(2026, 4, 5), Decimal("5.00"), False),
+    ]
+
+
+def test_forecast_covers_template_only_budget_only_and_neither_over_same_window(
+    ledger_path,
+):
+    # The three FORECAST-05 acceptance-criteria cases, all in one window:
+    # Expenses:Rent has a template but no budget, Expenses:Food:Groceries
+    # has a budget but no template, and Expenses:Food:Restaurant has
+    # neither.
+    append_entry(
+        ledger_path,
+        '2026-04-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.forecast(datetime.date(2026, 4, 1), datetime.date(2026, 4, 3))
+    by_account: dict[str, list[ForecastedActivity]] = {}
+    for row in rows:
+        by_account.setdefault(row.account, []).append(row)
+
+    # Template-only: one explicit row, on the template's own date.
+    assert by_account["Expenses:Rent"] == [
+        ForecastedActivity(
+            date=datetime.date(2026, 4, 1),
+            account="Expenses:Rent",
+            currency="USD",
+            amount=Decimal("1450.00"),
+            explicit=True,
+        )
+    ]
+
+    # Budget-only: one assumed row per day in the window.
+    groceries = sorted(by_account["Expenses:Food:Groceries"], key=lambda r: r.date)
+    assert [(r.date, r.amount, r.explicit) for r in groceries] == [
+        (datetime.date(2026, 4, 1), Decimal("10.00"), False),
+        (datetime.date(2026, 4, 2), Decimal("10.00"), False),
+        (datetime.date(2026, 4, 3), Decimal("10.00"), False),
+    ]
+
+    # Neither: no rows at all.
+    assert "Expenses:Food:Restaurant" not in by_account
