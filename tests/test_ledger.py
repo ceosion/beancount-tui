@@ -4,7 +4,7 @@ from pathlib import Path
 
 import beanquery
 import pytest
-from beancount.core import realization
+from beancount.core import data, realization
 
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
@@ -77,6 +77,38 @@ def test_reload_plugin_system_exit_surfaces_as_error_not_crash(tmp_path, monkeyp
     ledger.reload()
     assert len(ledger.errors) == 1
     assert "plugin_raises_system_exit" in ledger.errors[0].message
+
+
+def test_plugins_empty_when_none_declared(ledger_path):
+    """LANG-12: `examples/example.beancount` has no `plugin` line."""
+    ledger = Ledger.load(ledger_path)
+    assert ledger.plugins == []
+
+
+def test_plugins_returns_declared_plugin_names_and_configs(tmp_path):
+    """LANG-12: `Ledger.plugins` mirrors how `operating_currency` is read
+    from `self.options` -- a `plugin "module" "config"` line never becomes a
+    `data.*` entry (it's parsed into `options_map["plugin"]`), but the
+    real loader still runs it, so plugin-generated entries (here,
+    `auto_accounts`'s synthesized `Open` directives) still show up in
+    `ledger.entries` with zero special handling."""
+    ledger_file = tmp_path / "ledger.beancount"
+    ledger_file.write_text(
+        'plugin "beancount.plugins.auto_accounts"\n'
+        'option "operating_currency" "USD"\n'
+        "\n"
+        '2026-01-01 * "Employer" "Salary"\n'
+        "  Assets:Checking  10.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(ledger_file)
+    assert not ledger.errors
+    assert ledger.plugins == [("beancount.plugins.auto_accounts", None)]
+    # The plugin actually ran: auto_accounts synthesized Open entries for
+    # the two accounts posted to above, with no special handling needed.
+    opens = {e.account for e in ledger.entries if isinstance(e, data.Open)}
+    assert opens == {"Assets:Checking", "Income:Salary"}
 
 
 def test_transactions_for_account_includes_subaccounts(ledger_path):

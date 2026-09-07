@@ -1164,6 +1164,27 @@ class Ledger:
         return QueryResult(columns=columns, rows=rows)
 
     @property
+    def plugins(self) -> list[tuple[str, str | None]]:
+        """Declared ``plugin "module"`` directives: ``(name, config)`` pairs.
+
+        A ``plugin`` directive isn't a ``data.*`` entry at all (there's no
+        ``data.Plugin`` namedtuple) — the real ``beancount.loader`` already
+        executes it during parsing and folds its effects (e.g.
+        ``auto_accounts``-generated ``Open`` entries) into ``self.entries``,
+        so nothing about *running* a plugin needs special handling here.
+        What the loader does keep as distinct data is the *declaration*
+        itself, in ``options_map["plugin"]`` (the same place
+        ``operating_currency`` already lives — see ``holdings``/
+        ``converted_total`` reading ``self.options.get("operating_currency")``
+        above) — a list of ``(module_name, config_string_or_None)`` tuples,
+        one per ``plugin`` line in the ledger, in file order. Mirrored here
+        under its own name (rather than making every call site spell out
+        ``self.options.get("plugin", [])``) purely so the UI (``LANG-12``'s
+        ``LedgerInfoScreen``) has something to list.
+        """
+        return self.options.get("plugin", [])
+
+    @property
     def files(self) -> list[Path]:
         """All source files of the ledger: the top-level file, then includes.
 

@@ -257,7 +257,7 @@ this from `Ledger.options`.
 
 ### LANG-12: Surface and create `plugin` directives
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01, LANG-11
 - **Effort:** 1.5h
 
@@ -286,14 +286,14 @@ logic against raw file text rather than reusing the entry-object model
 every other directive type shares.
 
 **Acceptance criteria:**
-- [ ] `Ledger.plugins` returns the ledger's declared plugin names/configs.
-- [ ] `LedgerInfoScreen` lists declared plugins alongside existing options.
-- [ ] The add-directive picker can create a new `plugin` line (appended to
+- [x] `Ledger.plugins` returns the ledger's declared plugin names/configs.
+- [x] `LedgerInfoScreen` lists declared plugins alongside existing options.
+- [x] The add-directive picker can create a new `plugin` line (appended to
       the target file) via the same file-picker/template mechanism as
       other types.
-- [ ] Editing/deleting an existing `plugin` line is not attempted by this
+- [x] Editing/deleting an existing `plugin` line is not attempted by this
       task (documented as a follow-up, not a silent gap).
-- [ ] Test covering `Ledger.plugins` against a ledger with a `plugin`
+- [x] Test covering `Ledger.plugins` against a ledger with a `plugin`
       directive, the info screen showing it, and a new plugin line
       appending correctly via the add-directive flow.
 

@@ -44,6 +44,11 @@ def _render_ledger_info(ledger: Ledger) -> str:
 
     file_lines = [f"  {f}" for f in ledger.files]
 
+    plugin_lines = [
+        f"  {name}" + (f' "{config}"' if config is not None else "")
+        for name, config in ledger.plugins
+    ] or ["  (none declared)"]
+
     lines = [
         f"[b]Title:[/b] {title}",
         f"[b]Operating currencies:[/b] {currencies_text}",
@@ -51,6 +56,9 @@ def _render_ledger_info(ledger: Ledger) -> str:
         "",
         "[b]Account name roots:[/b]",
         *account_lines,
+        "",
+        "[b]Plugins:[/b]",
+        *plugin_lines,
         "",
         "[b]Source files:[/b]",
         *file_lines,
