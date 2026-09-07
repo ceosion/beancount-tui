@@ -11,6 +11,7 @@ from beancount_tui.ledger import (
     BudgetEntry,
     BudgetReportRow,
     Ledger,
+    RecurringTemplate,
     filter_transactions,
     format_inventory,
     format_query_value,
@@ -943,3 +944,154 @@ def test_budget_report_rolled_up_toggles_back_to_flat(ledger_path):
     assert flat_by_account["Expenses:Food:Groceries"] == rolled_up_by_account[
         "Expenses:Food:Groceries"
     ]
+
+
+def test_recurring_templates_empty_when_no_recurring_tagged_transactions(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.recurring_templates == []
+
+
+def test_recurring_templates_parses_across_intervals_long_and_short_form(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-02-02 * "Gym" "Membership" #recurring\n'
+        '  recurring-freq: "week"\n'
+        "  Expenses:Rent      20.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-02-03 * "Insurer" "Premium" #recurring\n'
+        '  recurring-freq: "QUARTER"\n'
+        "  Expenses:Rent      300.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-02-04 * "Domain Registrar" "Renewal" #recurring\n'
+        '  recurring-freq: "yearly"\n'
+        "  Expenses:Rent      15.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert len(ledger.recurring_templates) == 4
+    assert all(isinstance(t, RecurringTemplate) for t in ledger.recurring_templates)
+
+    by_first_date = {t.first_date: t for t in ledger.recurring_templates}
+    assert by_first_date[datetime.date(2026, 2, 1)].interval == "monthly"
+    assert by_first_date[datetime.date(2026, 2, 2)].interval == "weekly"
+    assert by_first_date[datetime.date(2026, 2, 3)].interval == "quarterly"
+    assert by_first_date[datetime.date(2026, 2, 4)].interval == "yearly"
+    # Every one of these templates has no end date.
+    assert all(t.until is None for t in ledger.recurring_templates)
+
+
+def test_recurring_templates_keeps_reference_to_original_transaction(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    template = ledger.recurring_templates[0]
+    assert template.transaction.payee == "Landlord"
+    assert template.transaction.narration == "Rent"
+    assert template.transaction.date == template.first_date == datetime.date(2026, 2, 1)
+    accounts = {p.account for p in template.transaction.postings}
+    assert accounts == {"Expenses:Rent", "Assets:Checking"}
+
+
+def test_recurring_templates_recurring_until_sets_end_date(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        '  recurring-until: "2026-12-31"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert len(ledger.recurring_templates) == 1
+    assert ledger.recurring_templates[0].until == datetime.date(2026, 12, 31)
+
+
+def test_recurring_templates_missing_freq_surfaces_as_error_not_crash(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert ledger.recurring_templates == []
+    assert len(ledger.errors) == 1
+    assert "recurring-freq" in ledger.errors[0].message
+
+
+def test_recurring_templates_invalid_freq_surfaces_as_error_not_crash(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "fortnightly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert ledger.recurring_templates == []
+    assert len(ledger.errors) == 1
+    assert "fortnightly" in ledger.errors[0].message
+
+
+def test_recurring_templates_invalid_until_surfaces_as_error_not_crash(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        '  recurring-until: "not-a-date"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert ledger.recurring_templates == []
+    assert len(ledger.errors) == 1
+    assert "recurring-until" in ledger.errors[0].message
+
+
+def test_recurring_templates_invalid_one_does_not_block_valid_ones(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-02-05 * "Gym" "Membership" #recurring\n'
+        '  recurring-freq: "fortnightly"\n'
+        "  Expenses:Rent      20.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert len(ledger.recurring_templates) == 1
+    assert ledger.recurring_templates[0].interval == "monthly"
+    assert len(ledger.errors) == 1
+
+
+def test_recurring_templates_ignores_untagged_transactions(ledger_path):
+    # A transaction with recurring-freq metadata but no #recurring tag isn't
+    # a template at all — the tag is what marks intent, not the metadata's
+    # mere presence.
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent"\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert ledger.recurring_templates == []
+    assert not ledger.errors
