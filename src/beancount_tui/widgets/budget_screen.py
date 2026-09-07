@@ -4,21 +4,23 @@ from __future__ import annotations
 
 import datetime
 from decimal import Decimal
+from typing import Any
 
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, Static
+from textual.widgets import Button, DataTable, Input, Label, Static
 
 from beancount_tui.ledger import Ledger, parse_date_range, resolve_date_preset
 from beancount_tui.widgets.date_input import DateRangeInput
+from beancount_tui.widgets.export_mixin import ExportMixin
 
 
 def _format_amount(value: Decimal, currency: str) -> str:
     return f"{value:,.2f} {currency}"
 
 
-class BudgetScreen(ModalScreen[None]):
+class BudgetScreen(ExportMixin, ModalScreen[None]):
     """Read-only budget-vs-actual report over the ledger; Escape closes it.
 
     Rows are the leaf accounts (per currency) with an active budget
@@ -55,6 +57,20 @@ class BudgetScreen(ModalScreen[None]):
         color: $error;
         height: auto;
     }
+    BudgetScreen #export-row {
+        height: auto;
+        margin-top: 1;
+    }
+    BudgetScreen #export-row Input {
+        width: 1fr;
+    }
+    BudgetScreen #export-row Select {
+        width: 14;
+    }
+    BudgetScreen #export-error {
+        color: $error;
+        height: auto;
+    }
     """
 
     def __init__(self, ledger: Ledger) -> None:
@@ -65,6 +81,14 @@ class BudgetScreen(ModalScreen[None]):
         # can re-render the same period's data under the other mode without
         # re-parsing (or resetting) the period input.
         self._current_range: tuple[datetime.date, datetime.date] | None = None
+        # Populated by ``_render_report``. The on-screen table folds each
+        # amount's currency into its own formatted cell (e.g. "12.34 USD");
+        # the export instead gets a dedicated "Currency" column plus raw
+        # ``Decimal`` amounts, the same shape ``ForecastScreen`` (the other
+        # per-account/currency report) uses, since a machine-readable export
+        # benefits from separated numeric values over parsed display text.
+        self._export_columns: list[str] = ["Account", "Currency", "Budgeted", "Actual", "Remaining"]
+        self._export_rows: list[list[Any]] = []
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -78,6 +102,7 @@ class BudgetScreen(ModalScreen[None]):
             )
             yield DataTable(id="report", cursor_type="none")
             yield Static("", id="period-error")
+            yield from self.compose_export_row()
 
     def on_mount(self) -> None:
         table = self.query_one("#report", DataTable)
@@ -92,6 +117,8 @@ class BudgetScreen(ModalScreen[None]):
         return resolve_date_preset("month")
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "period":
+            return
         event.stop()
         error = self.query_one("#period-error", Static)
         query = event.value.strip()
@@ -116,6 +143,15 @@ class BudgetScreen(ModalScreen[None]):
         error.update("")
         self._render_report(start, end)
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "export-path":
+            event.stop()
+            self._do_export()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "export":
+            self._do_export()
+
     def _render_report(self, start: datetime.date, end: datetime.date) -> None:
         self._current_range = (start, end)
         rows = (
@@ -125,6 +161,7 @@ class BudgetScreen(ModalScreen[None]):
         )
         table = self.query_one("#report", DataTable)
         table.clear()
+        export_rows: list[list[Any]] = []
         for row in rows:
             table.add_row(
                 row.account,
@@ -132,10 +169,15 @@ class BudgetScreen(ModalScreen[None]):
                 _format_amount(row.actual, row.currency),
                 _format_amount(row.remaining, row.currency),
             )
+            export_rows.append([row.account, row.currency, row.budgeted, row.actual, row.remaining])
+        self._export_rows = export_rows
         title = self.query_one("#title", Label)
         title.update(
             "[b]Budget vs. actual (rolled up)[/b]" if self._rolled_up else "[b]Budget vs. actual[/b]"
         )
+
+    def _export_columns_rows(self) -> tuple[list[str], list[list[Any]]]:
+        return self._export_columns, self._export_rows
 
     def action_toggle_rollup(self) -> None:
         """Toggle BUDGET-04's opt-in parent/child rollup, re-rendering the

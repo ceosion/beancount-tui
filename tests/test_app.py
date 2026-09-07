@@ -4303,3 +4303,259 @@ async def test_query_runner_export_existing_path_prompts_confirmation(ledger_pat
 
         assert out_path.read_text(encoding="utf-8") != "stale content\n"
         assert "Assets:Checking" in out_path.read_text(encoding="utf-8")
+
+
+# --- EXPORT-02: export rolled out to the remaining report screens ---------
+#
+# Each report screen exposes its own ``#export-path``/``#export-format``/
+# ``#export`` trio via ``ExportMixin`` (see
+# ``beancount_tui.widgets.export_mixin``), wired identically to
+# ``QueryRunnerScreen``'s. These tests focus on what's specific to each
+# screen -- the shape of the raw columns/rows it hands to
+# ``write_csv``/``write_json`` -- rather than re-covering the generic
+# validation/overwrite-confirmation UX already covered above. Trial balance
+# (flat) and balance sheet (sectioned) are the two acceptance-criteria-
+# mandated structurally-different shapes; income statement, holdings,
+# budget, and forecast are covered too since the marginal cost is low once
+# the shared mixin exists.
+
+
+async def test_trial_balance_export_csv(ledger_path, tmp_path):
+    """Flat report: one CSV row per account, raw (non-comma-grouped) balance."""
+    import csv
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("b")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, TrialBalanceScreen)
+
+        out_path = tmp_path / "trial-balance.csv"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        with out_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            header = next(reader)
+            rows = {row[0]: row[1] for row in reader}
+        assert header == ["Account", "Balance"]
+        # Raw Inventory rendering (no comma grouping), matching
+        # QueryRunnerScreen's export-vs-display convention.
+        assert rows["Assets:Checking"] == "(4098.45 USD)"
+
+        error = screen.query_one("#export-error", Static)
+        assert str(error.render()) == ""
+
+
+async def test_balance_sheet_export_json(ledger_path, tmp_path):
+    """Sectioned report: a leading "Section" column tags every line item
+    (including subtotal rows) so a spreadsheet/JSON consumer can group or
+    filter by section, rather than relying on the on-screen bold header/
+    blank-separator rows that don't survive into a flat export."""
+    import json
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("s")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BalanceSheetScreen)
+
+        out_path = tmp_path / "balance-sheet.json"
+        screen.query_one("#export-format", Select).value = "json"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        records = json.loads(out_path.read_text(encoding="utf-8"))
+        assert [rec["Section"] for rec in records[:1]] == ["Assets"]
+
+        by_key = {(rec["Section"], rec["Account"]): rec["Amount"] for rec in records}
+        assert by_key[("Assets", "Assets:Checking")] == [
+            {"number": "4098.45", "currency": "USD"}
+        ]
+        assert by_key[("Assets", "Total assets")] == [
+            {"number": "5098.45", "currency": "USD"}
+        ]
+        assert by_key[("Equity", "Net income (current period)")] == [
+            {"number": "2598.45", "currency": "USD"}
+        ]
+        # The cross-section total gets its own "Summary" section rather
+        # than being forced into Assets/Liabilities/Equity.
+        assert by_key[("Summary", "Total liabilities + equity")] == [
+            {"number": "5098.45", "currency": "USD"}
+        ]
+
+        error = screen.query_one("#export-error", Static)
+        assert str(error.render()) == ""
+
+
+async def test_income_statement_export_csv(ledger_path, tmp_path):
+    """Sectioned report, single-period mode: same "Section" column choice
+    as the balance sheet's."""
+    import csv
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IncomeStatementScreen)
+
+        out_path = tmp_path / "income-statement.csv"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        with out_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            header = next(reader)
+            rows = {(row[0], row[1]): row[2] for row in reader}
+        assert header == ["Section", "Account", "Amount"]
+        assert rows[("Income", "Total income")] == "(4200.00 USD)"
+        assert rows[("Expenses", "Total expenses")] == "(1601.55 USD)"
+        assert rows[("Summary", "Net")] == "(2598.45 USD)"
+
+
+async def test_holdings_export_json(ledger_path, tmp_path):
+    """Flat report: one JSON row per holding, raw ``Decimal``/``Inventory``/
+    ``Amount`` values plus a trailing net-worth summary row."""
+    import json
+
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-01-20 * "Buy stock"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n\n"
+        "2026-02-01 price HOOL  550.00 USD\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("w")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, HoldingsScreen)
+
+        out_path = tmp_path / "holdings.json"
+        screen.query_one("#export-format", Select).value = "json"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        records = json.loads(out_path.read_text(encoding="utf-8"))
+        hool_rows = [rec for rec in records if rec["Commodity"] == "HOOL"]
+        assert len(hool_rows) == 1
+        hool = hool_rows[0]
+        assert hool["Account"] == "Assets:Investments"
+        assert hool["Quantity"] == "10"
+        assert hool["Cost basis"] == [{"number": "5000.00", "currency": "USD"}]
+        assert hool["Market value"] == {"number": "5500.00", "currency": "USD"}
+
+        net_worth_rows = [rec for rec in records if "Net worth" in rec["Commodity"]]
+        assert len(net_worth_rows) == 1
+        assert net_worth_rows[0]["Market value"] == [
+            {"number": "5500.00", "currency": "USD"}
+        ]
+
+
+async def test_budget_screen_export_csv(ledger_path, tmp_path):
+    """Flat per-account/currency report: a dedicated "Currency" column plus
+    raw ``Decimal`` amounts, rather than the on-screen "12.34 USD"-style
+    combined text -- more useful for a machine-readable export."""
+    import csv
+
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n',
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(BudgetScreen(app.ledger))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BudgetScreen)
+
+        screen.query_one("#period", Input).value = "2026-01-01..2026-01-31"
+        await pilot.pause()
+
+        out_path = tmp_path / "budget.csv"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        with out_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            header = next(reader)
+            rows = {row[0]: row[1:] for row in reader}
+        assert header == ["Account", "Currency", "Budgeted", "Actual", "Remaining"]
+        assert rows["Expenses:Food:Groceries"] == ["USD", "310.00", "87.35", "222.65"]
+
+
+async def test_forecast_screen_export_csv(ledger_path, tmp_path):
+    """Flat per-account/currency report: adds a "Status" column beyond the
+    five on-screen ones, since the on-screen explicit/assumed/mixed
+    provenance is conveyed purely by cell color, which a CSV/JSON cell
+    can't represent."""
+    import csv
+
+    append_entry(
+        ledger_path,
+        '2026-04-20 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "daily" 10.00 USD\n'
+        '2026-04-05 * "Green Grocer" "Early April groceries"\n'
+        "  Expenses:Food:Groceries     87.35 USD\n"
+        "  Assets:Checking\n",
+    )
+    today = datetime.date(2026, 4, 15)
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(ForecastScreen(app.ledger, today=today))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, ForecastScreen)
+
+        screen.query_one("#period", Input).value = "2026-04-01..2026-04-30"
+        await pilot.pause()
+
+        out_path = tmp_path / "forecast.csv"
+        screen.query_one("#export-path", Input).value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        with out_path.open(newline="", encoding="utf-8") as fh:
+            reader = csv.reader(fh)
+            header = next(reader)
+            rows = {row[0]: row[1:] for row in reader}
+        assert header == ["Account", "Currency", "Actual", "Projected", "Status", "Total"]
+        assert rows["Expenses:Food:Groceries"] == [
+            "USD",
+            "87.35",
+            "160.00",
+            "assumed",
+            "247.35",
+        ]
+        assert rows["Expenses:Rent"] == ["USD", "0", "1450.00", "explicit", "1450.00"]
