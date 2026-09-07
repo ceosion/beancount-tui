@@ -91,7 +91,7 @@ transaction.
 
 ### FORECAST-03: Recurring template creation/editing
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-01
 - **Effort:** 1.5h
 
@@ -104,13 +104,13 @@ payee/narration/postings fields already handled by the existing assembly
 logic — no separate form or duplicated postings editor.
 
 **Acceptance criteria:**
-- [ ] Toggling "recurring" on a new or existing transaction adds the
+- [x] Toggling "recurring" on a new or existing transaction adds the
       interval select and optional end-date field.
-- [ ] Saving produces a transaction with the `#recurring` tag and correct
+- [x] Saving produces a transaction with the `#recurring` tag and correct
       metadata, parseable by `FORECAST-01`.
-- [ ] Toggling recurring off before saving produces a normal transaction
+- [x] Toggling recurring off before saving produces a normal transaction
       with no tag/metadata added.
-- [ ] Test covering creating a recurring template through the form and
+- [x] Test covering creating a recurring template through the form and
       confirming it round-trips into a `RecurringTemplate`.
 
 ---

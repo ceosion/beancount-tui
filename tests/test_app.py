@@ -193,6 +193,200 @@ async def test_edit_transaction_tags_links_via_form(ledger_path):
     assert txn.links == frozenset()
 
 
+async def test_transaction_form_recurring_toggle_reveals_interval_and_until_fields(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        interval = form.query_one("#recurring-interval", Select)
+        until = form.query_one("#recurring-until", Input)
+        assert interval.display is False
+        assert until.display is False
+
+        form.query_one("#recurring", Checkbox).value = True
+        await pilot.pause()
+        assert interval.display is True
+        assert until.display is True
+
+        form.query_one("#recurring", Checkbox).value = False
+        await pilot.pause()
+        assert interval.display is False
+        assert until.display is False
+
+
+async def test_new_recurring_transaction_via_form_round_trips_into_recurring_template(
+    ledger_path,
+):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#date", Input).value = "2026-09-06"
+        form.query_one("#payee", Input).value = "Landlord"
+        form.query_one("#narration", Input).value = "Rent"
+        form.query_one("#postings", PostingsArea).text = (
+            "Expenses:Rent  1450.00 USD\nAssets:Checking"
+        )
+        form.query_one("#recurring", Checkbox).value = True
+        await pilot.pause()
+        form.query_one("#recurring-interval", Select).value = "monthly"
+        form.query_one("#recurring-until", Input).value = "2027-01-01"
+
+        # Assembled text must carry the tag and metadata before any posting
+        # line, per Beancount's metadata-attachment rule.
+        text = form._assemble_text()
+        lines = text.splitlines()
+        assert lines[0].endswith('#recurring')
+        assert lines[1] == '  recurring-freq: "monthly"'
+        assert lines[2] == '  recurring-until: "2027-01-01"'
+        assert lines[3] == "  Expenses:Rent  1450.00 USD"
+
+        form._save()
+        await pilot.pause()
+        assert not isinstance(app.screen, TransactionForm)
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    templates = [t for t in ledger.recurring_templates if t.transaction.payee == "Landlord"]
+    assert len(templates) == 1
+    template = templates[0]
+    assert template.first_date == datetime.date(2026, 9, 6)
+    assert template.interval == "monthly"
+    assert template.until == datetime.date(2027, 1, 1)
+
+
+async def test_recurring_toggle_off_produces_plain_transaction(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee", Input).value = "Corner Cafe"
+        form.query_one("#narration", Input).value = "Coffee"
+        form.query_one("#postings", PostingsArea).text = (
+            "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+        )
+        # Toggle on then back off before saving: no tag/metadata should
+        # survive.
+        form.query_one("#recurring", Checkbox).value = True
+        await pilot.pause()
+        form.query_one("#recurring", Checkbox).value = False
+        await pilot.pause()
+
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.narration == "Coffee"
+    assert "recurring" not in (txn.tags or set())
+    assert "recurring-freq" not in txn.meta
+    assert ledger.recurring_templates == []
+
+
+async def test_recurring_toggle_dedupes_manually_typed_tag(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee", Input).value = "Landlord"
+        form.query_one("#narration", Input).value = "Rent"
+        form.query_one("#tags_links", Input).value = "#recurring #important"
+        form.query_one("#postings", PostingsArea).text = (
+            "Expenses:Rent  1450.00 USD\nAssets:Checking"
+        )
+        form.query_one("#recurring", Checkbox).value = True
+        await pilot.pause()
+
+        text = form._assemble_text()
+        header = text.splitlines()[0]
+        assert header.count("#recurring") == 1
+        assert "#important" in header
+
+
+async def test_edit_recurring_transaction_via_form_prefills_guided_fields(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        '  recurring-until: "2026-12-31"\n'
+        "  Expenses:Rent  1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=table.row_count - 1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        assert form.query_one("#recurring", Checkbox).value is True
+        assert form.query_one("#recurring-interval", Select).value == "monthly"
+        assert form.query_one("#recurring-until", Input).value == "2026-12-31"
+        # The tag/metadata are owned by the guided fields now, not the raw
+        # free-text/postings fields.
+        assert "#recurring" not in form.query_one("#tags_links", Input).value
+        assert "recurring-freq" not in form.query_one("#postings", PostingsArea).text
+
+        form.query_one("#recurring-until", Input).value = "2027-06-30"
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    templates = [t for t in ledger.recurring_templates if t.transaction.payee == "Landlord"]
+    assert len(templates) == 1
+    assert templates[0].until == datetime.date(2027, 6, 30)
+    assert templates[0].interval == "monthly"
+
+
+async def test_edit_recurring_transaction_toggle_off_removes_template(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-16 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent  1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=table.row_count - 1)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        assert form.query_one("#recurring", Checkbox).value is True
+
+        form.query_one("#recurring", Checkbox).value = False
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = next(t for t in ledger.transactions if t.payee == "Landlord")
+    assert "recurring" not in (txn.tags or set())
+    assert "recurring-freq" not in txn.meta
+    assert ledger.recurring_templates == []
+
+
 async def test_filter_by_tag(ledger_path):
     append_entry(
         ledger_path,

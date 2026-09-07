@@ -15,7 +15,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
 from beancount_tui.importer import ImportCandidate
-from beancount_tui.ledger import Ledger, filter_transactions
+from beancount_tui.ledger import Ledger, RecurringTemplate, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
@@ -617,7 +617,16 @@ class BeancountTUI(App):
                 replace_entry(entry, result.text)
                 self.action_reload()
 
-            self.push_screen(_edit_form(entry, self.ledger.accounts), on_form_result)
+            # If this transaction is itself a FORECAST-01 recurring template,
+            # pre-fill the form's guided recurring fields from its already
+            # -parsed ``RecurringTemplate`` rather than re-deriving
+            # interval/until from raw tags/metadata here.
+            recurring_template = next(
+                (t for t in self.ledger.recurring_templates if t.transaction is entry), None
+            )
+            self.push_screen(
+                _edit_form(entry, self.ledger.accounts, recurring_template), on_form_result
+            )
             return
 
         def on_directive_result(result: DirectiveFormResult | None) -> None:
@@ -680,29 +689,67 @@ def _entry_summary(entry: data.Directive) -> str:
     return f"{keyword} directive {entry.date} {accounts}"
 
 
-def _postings_text(txn: data.Transaction) -> str:
+def _postings_text(txn: data.Transaction, exclude_meta_keys: tuple[str, ...] = ()) -> str:
     lines = format_entry(txn).rstrip("\n").split("\n")
-    return "\n".join(line.strip() for line in lines[1:])
+    body_lines = [line.strip() for line in lines[1:]]
+    if exclude_meta_keys:
+        # Drop this transaction's own metadata lines (e.g. FORECAST-01's
+        # ``recurring-freq``/``recurring-until``) from the postings text
+        # when a guided field elsewhere in the form already owns them —
+        # otherwise editing a recurring template would duplicate that
+        # metadata (once from the raw copied line, once from the guided
+        # field) when the form reassembles the transaction.
+        body_lines = [
+            line
+            for line in body_lines
+            if not any(line.startswith(f"{key}:") for key in exclude_meta_keys)
+        ]
+    return "\n".join(body_lines)
 
 
-def _tags_links_text(txn: data.Transaction) -> str:
+_RECURRING_META_KEYS = ("recurring-freq", "recurring-until")
+
+
+def _tags_links_text(txn: data.Transaction, exclude_tags: frozenset[str] = frozenset()) -> str:
     """Render a transaction's tags/links as ``#tag ^link`` text for the form."""
-    tokens = [f"#{tag}" for tag in sorted(txn.tags or ())]
+    tokens = [f"#{tag}" for tag in sorted(txn.tags or ()) if tag not in exclude_tags]
     tokens += [f"^{link}" for link in sorted(txn.links or ())]
     return " ".join(tokens)
 
 
-def _edit_form(txn: data.Transaction, accounts: list[str]) -> TransactionForm:
-    """Build a form pre-filled from an existing transaction."""
+def _edit_form(
+    txn: data.Transaction,
+    accounts: list[str],
+    recurring_template: RecurringTemplate | None = None,
+) -> TransactionForm:
+    """Build a form pre-filled from an existing transaction.
+
+    When ``txn`` is a FORECAST-01 recurring template, the guided recurring
+    toggle/interval/until fields are pre-filled from ``recurring_template``
+    and the ``#recurring`` tag / ``recurring-freq``/``recurring-until``
+    metadata are excluded from the free-text tags/links field and postings
+    text respectively, so the guided fields are the single source of truth
+    for them (the toggle re-adds ``#recurring`` and the metadata lines at
+    save time — see ``TransactionForm._assemble_text``).
+    """
+    exclude_tags = frozenset({"recurring"}) if recurring_template else frozenset()
+    exclude_meta = _RECURRING_META_KEYS if recurring_template else ()
     return TransactionForm(
         date=txn.date.isoformat(),
         flag=txn.flag or "*",
         payee=txn.payee or "",
         narration=txn.narration or "",
-        tags_links=_tags_links_text(txn),
-        postings_text=_postings_text(txn),
+        tags_links=_tags_links_text(txn, exclude_tags=exclude_tags),
+        postings_text=_postings_text(txn, exclude_meta_keys=exclude_meta),
         title="Edit transaction",
         accounts=accounts,
+        recurring=recurring_template is not None,
+        recurring_interval=recurring_template.interval if recurring_template else "monthly",
+        recurring_until=(
+            recurring_template.until.isoformat()
+            if recurring_template and recurring_template.until
+            else ""
+        ),
     )
 
 
