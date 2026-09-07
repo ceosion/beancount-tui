@@ -843,3 +843,103 @@ def test_budget_report_tracks_currencies_as_separate_rows(ledger_path):
     assert set(by_currency) == {"USD", "EUR"}
     assert by_currency["USD"].actual == Decimal("87.35")
     assert by_currency["EUR"].actual == Decimal("0")
+
+
+def test_budget_report_rolled_up_sums_siblings_into_shared_parent(ledger_path):
+    # example.beancount's 3-level hierarchy: Expenses:Food:Groceries and
+    # Expenses:Food:Restaurant are sibling leaves under Expenses:Food, which
+    # itself has no budget directive of its own. Groceries has an 87.35
+    # actual posting (2026-01-06), Restaurant a 64.20 one (2026-01-14); both
+    # amounts are multiples of 31 so the January (31-day) monthly proration
+    # is exact, like the existing budget_report tests' 310.00 fixture.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food:Restaurant "monthly" 155.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)
+
+    flat_rows = ledger.budget_report(start, end)
+    flat_accounts = {row.account for row in flat_rows}
+    assert flat_accounts == {"Expenses:Food:Groceries", "Expenses:Food:Restaurant"}
+
+    rolled_up = ledger.budget_report_rolled_up(start, end)
+    by_account = {row.account: row for row in rolled_up}
+
+    # The flat leaf rows are unchanged.
+    assert by_account["Expenses:Food:Groceries"].budgeted == Decimal("310.00")
+    assert by_account["Expenses:Food:Groceries"].actual == Decimal("87.35")
+    assert by_account["Expenses:Food:Restaurant"].budgeted == Decimal("155.00")
+    assert by_account["Expenses:Food:Restaurant"].actual == Decimal("64.20")
+
+    # Expenses:Food has no direct budget, so it's synthesized by summing its
+    # two budgeted children.
+    assert "Expenses:Food" in by_account
+    food = by_account["Expenses:Food"]
+    assert food.currency == "USD"
+    assert food.budgeted == Decimal("465.00")
+    assert food.actual == Decimal("151.55")
+    assert food.remaining == Decimal("313.45")
+
+    # Expenses (grandparent) is also synthesized, from the same two
+    # budgeted descendants — not from Expenses:Food's already-synthesized
+    # row, so the total isn't inflated by summing through an intermediate.
+    assert "Expenses" in by_account
+    assert by_account["Expenses"].budgeted == Decimal("465.00")
+    assert by_account["Expenses"].actual == Decimal("151.55")
+
+    # Expenses:Rent has postings but no budget in this test, and shouldn't
+    # be pulled into any rollup.
+    assert "Expenses:Rent" not in by_account
+
+
+def test_budget_report_rolled_up_direct_parent_budget_not_double_counted(ledger_path):
+    # Expenses:Food gets its own direct budget on top of its two budgeted
+    # children (BUDGET-04's "not double-counted" acceptance criterion).
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food:Restaurant "monthly" 155.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food "monthly" 930.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)
+
+    rolled_up = ledger.budget_report_rolled_up(start, end)
+    by_account = {row.account: row for row in rolled_up}
+
+    # Expenses:Food has a direct row, so no synthesized "sum of children"
+    # row is added for it — it keeps only its own figures.
+    food_rows = [row for row in rolled_up if row.account == "Expenses:Food"]
+    assert len(food_rows) == 1
+    assert food_rows[0].budgeted == Decimal("930.00")
+    assert food_rows[0].actual == Decimal("0")
+
+    # Expenses (grandparent) still has no direct budget, so it's
+    # synthesized by summing every budgeted descendant exactly once: its
+    # own Food entry plus Groceries plus Restaurant.
+    assert by_account["Expenses"].budgeted == Decimal("930.00") + Decimal("310.00") + Decimal(
+        "155.00"
+    )
+    assert by_account["Expenses"].actual == Decimal("87.35") + Decimal("64.20")
+
+
+def test_budget_report_rolled_up_toggles_back_to_flat(ledger_path):
+    # No parent-level assertions here beyond confirming the flat and
+    # rolled-up views agree on the leaf rows they share, i.e. the rollup is
+    # additive rather than replacing the flat view (BudgetScreen's "r"
+    # toggle switches between calling one or the other).
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    start, end = datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)
+    flat_rows = ledger.budget_report(start, end)
+    rolled_up_rows = ledger.budget_report_rolled_up(start, end)
+    flat_by_account = {row.account: row for row in flat_rows}
+    rolled_up_by_account = {row.account: row for row in rolled_up_rows}
+    assert flat_by_account["Expenses:Food:Groceries"] == rolled_up_by_account[
+        "Expenses:Food:Groceries"
+    ]

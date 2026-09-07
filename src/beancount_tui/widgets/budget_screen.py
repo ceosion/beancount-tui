@@ -22,11 +22,13 @@ class BudgetScreen(ModalScreen[None]):
 
     Rows are the leaf accounts (per currency) with an active budget
     somewhere in the selected period (see ``Ledger.budget_report`` —
-    accounts with no budget defined at all are excluded; rolling a budgeted
-    parent's descendants up into it is BUDGET-04, not this screen).
+    accounts with no budget defined at all are excluded). The ``r`` binding
+    toggles an opt-in parent/child rollup (``Ledger.budget_report_rolled_up``,
+    BUDGET-04) on top of the same period, off by default so this flat
+    per-leaf view stays the default.
     """
 
-    BINDINGS = [("escape", "close", "Close")]
+    BINDINGS = [("escape", "close", "Close"), ("r", "toggle_rollup", "Rollup")]
 
     DEFAULT_CSS = """
     BudgetScreen {
@@ -57,10 +59,15 @@ class BudgetScreen(ModalScreen[None]):
     def __init__(self, ledger: Ledger) -> None:
         super().__init__()
         self._ledger = ledger
+        self._rolled_up = False
+        # Set by every ``_render_report`` call so ``action_toggle_rollup``
+        # can re-render the same period's data under the other mode without
+        # re-parsing (or resetting) the period input.
+        self._current_range: tuple[datetime.date, datetime.date] | None = None
 
     def compose(self) -> ComposeResult:
         with Vertical():
-            yield Label("[b]Budget vs. actual[/b]")
+            yield Label("[b]Budget vs. actual[/b]", id="title")
             yield Input(
                 placeholder=(
                     "Period YYYY-MM-DD..YYYY-MM-DD, or month/last-month/year/last-year "
@@ -109,7 +116,12 @@ class BudgetScreen(ModalScreen[None]):
         self._render_report(start, end)
 
     def _render_report(self, start: datetime.date, end: datetime.date) -> None:
-        rows = self._ledger.budget_report(start, end)
+        self._current_range = (start, end)
+        rows = (
+            self._ledger.budget_report_rolled_up(start, end)
+            if self._rolled_up
+            else self._ledger.budget_report(start, end)
+        )
         table = self.query_one("#report", DataTable)
         table.clear()
         for row in rows:
@@ -119,6 +131,17 @@ class BudgetScreen(ModalScreen[None]):
                 _format_amount(row.actual, row.currency),
                 _format_amount(row.remaining, row.currency),
             )
+        title = self.query_one("#title", Label)
+        title.update(
+            "[b]Budget vs. actual (rolled up)[/b]" if self._rolled_up else "[b]Budget vs. actual[/b]"
+        )
+
+    def action_toggle_rollup(self) -> None:
+        """Toggle BUDGET-04's opt-in parent/child rollup, re-rendering the
+        current period's data either way (flat per-leaf by default)."""
+        self._rolled_up = not self._rolled_up
+        if self._current_range is not None:
+            self._render_report(*self._current_range)
 
     def action_close(self) -> None:
         self.dismiss(None)
