@@ -101,7 +101,7 @@ single action instead of two manual directive entries.
 
 ### EDIT-05: Offer to create missing accounts on transaction save
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-01
 - **Effort:** 1.5h
 
@@ -123,15 +123,15 @@ an error on next load. Applies to new, edited, and duplicated transactions
 alike, since all three go through the same undeclared-account risk.
 
 **Acceptance criteria:**
-- [ ] Saving a transaction whose postings are all against already-declared
+- [x] Saving a transaction whose postings are all against already-declared
       accounts is unaffected (no prompt).
-- [ ] Saving a transaction referencing at least one undeclared account
+- [x] Saving a transaction referencing at least one undeclared account
       prompts to create matching `open` directives; accepting appends both
       the new `open`(s) and the transaction.
-- [ ] Declining the prompt rejects the save — the transaction is not
+- [x] Declining the prompt rejects the save — the transaction is not
       appended, and the form's entered content is preserved so the user
       doesn't lose their input.
-- [ ] Applies uniformly to the new-transaction, edit, and duplicate flows.
-- [ ] Test covering both the accept path (open + transaction both appended,
+- [x] Applies uniformly to the new-transaction, edit, and duplicate flows.
+- [x] Test covering both the accept path (open + transaction both appended,
       ledger still validates) and the decline path (nothing appended).
 

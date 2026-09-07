@@ -82,6 +82,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         recurring: bool = False,
         recurring_interval: str = "monthly",
         recurring_until: str = "",
+        selected_file: str | None = None,
     ) -> None:
         super().__init__()
         self._accounts = accounts or []
@@ -94,6 +95,12 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         self._title = title
         # Offer a target-file picker only when there is a real choice.
         self._files = files if files and len(files) > 1 else None
+        # EDIT-05: which file's Select entry to preselect when reopening the
+        # form after a declined missing-account prompt, so the user's
+        # previously-chosen target file isn't silently reset to the first
+        # one. Ignored (falls back to the first file) if it isn't one of
+        # `files`.
+        self._selected_file = selected_file
         # FORECAST-03: guided "recurring template" fields layered on top of
         # the free-text tags/links input above, rather than replacing it —
         # see ``_with_recurring_tag`` for how the two are reconciled at save
@@ -143,9 +150,13 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield PostingsArea(self._postings_text, id="postings", accounts=self._accounts)
             if self._files:
                 yield Label("File", classes="field-label")
+                file_values = [str(f) for f in self._files]
+                default_file = (
+                    self._selected_file if self._selected_file in file_values else file_values[0]
+                )
                 yield Select(
-                    [(self._file_label(f), str(f)) for f in self._files],
-                    value=str(self._files[0]),
+                    [(self._file_label(f), value) for f, value in zip(self._files, file_values)],
+                    value=default_file,
                     allow_blank=False,
                     id="target-file",
                 )
