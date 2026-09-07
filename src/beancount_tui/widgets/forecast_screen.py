@@ -5,15 +5,17 @@ from __future__ import annotations
 import calendar
 import datetime
 from decimal import Decimal
+from typing import Any
 
 from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Input, Label, Static
+from textual.widgets import Button, DataTable, Input, Label, Static
 
 from beancount_tui.ledger import ForecastReportRow, Ledger, parse_date_range
 from beancount_tui.widgets.date_input import DateRangeInput
+from beancount_tui.widgets.export_mixin import ExportMixin
 
 # One style per ``ForecastReportRow.status`` value so a mixed-composition
 # report stays scannable, the same convention ``transaction_table.py``'s
@@ -55,7 +57,7 @@ def _add_months(day: datetime.date, months: int) -> datetime.date:
     return datetime.date(year, month, min(day.day, last_day_of_month))
 
 
-class ForecastScreen(ModalScreen[None]):
+class ForecastScreen(ExportMixin, ModalScreen[None]):
     """Read-only cash-flow forecast over the ledger; Escape closes it.
 
     Unlike the other report screens, this one defaults to a *forward*
@@ -99,6 +101,20 @@ class ForecastScreen(ModalScreen[None]):
         color: $error;
         height: auto;
     }
+    ForecastScreen #export-row {
+        height: auto;
+        margin-top: 1;
+    }
+    ForecastScreen #export-row Input {
+        width: 1fr;
+    }
+    ForecastScreen #export-row Select {
+        width: 14;
+    }
+    ForecastScreen #export-error {
+        color: $error;
+        height: auto;
+    }
     """
 
     def __init__(self, ledger: Ledger, today: datetime.date | None = None) -> None:
@@ -108,6 +124,21 @@ class ForecastScreen(ModalScreen[None]):
         # uses the real current date); mirrors ``resolve_date_preset``'s own
         # ``today`` parameter for the same reason.
         self._today = today if today is not None else datetime.date.today()
+        # Populated by ``_render_report``. Adds a "Status" column beyond the
+        # five on-screen columns: on screen, explicit/assumed/mixed
+        # provenance for the Projected figure is conveyed purely by color
+        # (see ``_STATUS_STYLES``), which has no equivalent in a CSV/JSON
+        # cell, so it becomes its own explicit column instead of being
+        # silently dropped.
+        self._export_columns: list[str] = [
+            "Account",
+            "Currency",
+            "Actual",
+            "Projected",
+            "Status",
+            "Total",
+        ]
+        self._export_rows: list[list[Any]] = []
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -121,6 +152,7 @@ class ForecastScreen(ModalScreen[None]):
             )
             yield DataTable(id="report", cursor_type="none")
             yield Static("", id="period-error")
+            yield from self.compose_export_row()
 
     def on_mount(self) -> None:
         table = self.query_one("#report", DataTable)
@@ -138,6 +170,8 @@ class ForecastScreen(ModalScreen[None]):
         return self._today, _add_months(self._today, 3)
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if event.input.id != "period":
+            return
         event.stop()
         error = self.query_one("#period-error", Static)
         query = event.value.strip()
@@ -162,10 +196,20 @@ class ForecastScreen(ModalScreen[None]):
         error.update("")
         self._render_report(start, end)
 
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        if event.input.id == "export-path":
+            event.stop()
+            self._do_export()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id == "export":
+            self._do_export()
+
     def _render_report(self, start: datetime.date, end: datetime.date) -> None:
         rows = self._ledger.forecast_report(start, end, today=self._today)
         table = self.query_one("#report", DataTable)
         table.clear()
+        export_rows: list[list[Any]] = []
         for row in rows:
             table.add_row(
                 row.account,
@@ -174,6 +218,13 @@ class ForecastScreen(ModalScreen[None]):
                 _projected_cell(row),
                 _format_amount(row.total, row.currency),
             )
+            export_rows.append(
+                [row.account, row.currency, row.actual, row.projected, row.status, row.total]
+            )
+        self._export_rows = export_rows
+
+    def _export_columns_rows(self) -> tuple[list[str], list[list[Any]]]:
+        return self._export_columns, self._export_rows
 
     def action_close(self) -> None:
         self.dismiss(None)
