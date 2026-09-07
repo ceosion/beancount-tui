@@ -14,12 +14,13 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static
 
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
 from beancount_tui.widgets.budget_form import INTERVALS
 from beancount_tui.widgets.date_input import DateInput
 from beancount_tui.widgets.postings_area import PostingsArea
+from beancount_tui.widgets.structured_postings import StructuredPostingsArea
 
 
 @dataclass
@@ -33,7 +34,10 @@ class TransactionFormResult:
 class TransactionForm(ModalScreen[TransactionFormResult | None]):
     """Returns a :class:`TransactionFormResult`, or ``None`` if cancelled."""
 
-    BINDINGS = [("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        ("escape", "cancel", "Cancel"),
+        ("f2", "toggle_postings_view", "Toggle postings view"),
+    ]
 
     DEFAULT_CSS = """
     TransactionForm {
@@ -53,6 +57,18 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
     }
     TransactionForm #postings {
         height: 8;
+    }
+    TransactionForm #postings-header {
+        height: auto;
+        align-horizontal: left;
+    }
+    TransactionForm #postings-header .field-label {
+        width: 1fr;
+        content-align: left middle;
+    }
+    TransactionForm #toggle-postings-view {
+        height: auto;
+        min-width: 1;
     }
     TransactionForm #error {
         color: $error;
@@ -109,6 +125,11 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         self._recurring = recurring
         self._recurring_interval = recurring_interval
         self._recurring_until = recurring_until
+        # UX-08: postings can be edited either as raw Beancount text
+        # (`PostingsArea`, the default) or as structured rows
+        # (`StructuredPostingsArea`); this tracks which one is authoritative
+        # for `_assemble_text` at save time. See `action_toggle_postings_view`.
+        self._structured_active = False
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -144,11 +165,21 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield interval_select
             yield until_label
             yield until_input
-            yield Label(
-                "Postings (one per line: ACCOUNT  AMOUNT CURRENCY; Tab completes accounts)",
-                classes="field-label",
-            )
+            with Horizontal(id="postings-header"):
+                yield Label(
+                    "Postings (one per line: ACCOUNT  AMOUNT CURRENCY; "
+                    "Tab completes accounts)",
+                    classes="field-label",
+                )
+                yield Button(
+                    "Structured view", id="toggle-postings-view", variant="default"
+                )
             yield PostingsArea(self._postings_text, id="postings", accounts=self._accounts)
+            structured = StructuredPostingsArea(
+                accounts=self._accounts, id="postings-structured"
+            )
+            structured.display = False
+            yield structured
             if self._files:
                 yield Label("File", classes="field-label")
                 file_values = [str(f) for f in self._files]
@@ -180,13 +211,58 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         ):
             self.query_one(widget_id).display = visible
 
+    def _active_postings_text(self) -> str:
+        """The current posting-lines text from whichever postings view is
+        active (UX-08) -- the raw-text `PostingsArea` by default, or the
+        structured row editor after a successful toggle. Whichever is
+        active when the form is saved is authoritative."""
+        if self._structured_active:
+            return self.query_one("#postings-structured", StructuredPostingsArea).to_text()
+        return self.query_one("#postings", PostingsArea).text
+
+    async def action_toggle_postings_view(self) -> None:
+        """Switch between the raw-text and structured postings views,
+        carrying already-entered postings across (UX-08).
+
+        Structured -> raw always succeeds: structured rows always serialize
+        to valid posting-line text. Raw -> structured only succeeds if every
+        posting line decomposes into a plain account/amount/currency triple
+        (see `editor.decompose_postings_text`); if not (cost basis, price
+        annotation, flag, or metadata is present), the raw view stays active
+        and a notification explains why, rather than silently dropping or
+        corrupting that syntax.
+        """
+        raw = self.query_one("#postings", PostingsArea)
+        structured = self.query_one("#postings-structured", StructuredPostingsArea)
+        toggle_button = self.query_one("#toggle-postings-view", Button)
+        if self._structured_active:
+            raw.text = structured.to_text()
+            structured.display = False
+            raw.display = True
+            self._structured_active = False
+            toggle_button.label = "Structured view"
+        else:
+            ok = await structured.load_text(raw.text)
+            if not ok:
+                self.notify(
+                    "These postings use syntax the structured view can't "
+                    "edit (cost basis, price annotation, flag, or "
+                    "metadata) — staying in raw text view.",
+                    severity="warning",
+                )
+                return
+            raw.display = False
+            structured.display = True
+            self._structured_active = True
+            toggle_button.label = "Raw text view"
+
     def _assemble_text(self) -> str:
         date = self.query_one("#date", Input).value.strip()
         flag = self.query_one("#flag", Input).value.strip() or "*"
         payee = self.query_one("#payee", Input).value.strip()
         narration = self.query_one("#narration", Input).value.strip()
         tags_links = self.query_one("#tags_links", Input).value.strip()
-        postings = self.query_one("#postings", TextArea).text
+        postings = self._active_postings_text()
         recurring = self.query_one("#recurring", Checkbox).value
 
         if recurring:
@@ -247,10 +323,12 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             filename = str(self.query_one("#target-file", Select).value)
         self.dismiss(TransactionFormResult(text=text, filename=filename))
 
-    def on_button_pressed(self, event: Button.Pressed) -> None:
+    async def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "save":
             self._save()
-        else:
+        elif event.button.id == "toggle-postings-view":
+            await self.action_toggle_postings_view()
+        elif event.button.id == "cancel":
             self.dismiss(None)
 
     def action_cancel(self) -> None:

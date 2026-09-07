@@ -9,9 +9,11 @@ that Beancount attaches to every entry it parses.
 from __future__ import annotations
 
 import re
+from dataclasses import dataclass
 from pathlib import Path
 
 from beancount.core import data
+from beancount.core.number import MISSING
 from beancount.parser import parser, printer
 
 
@@ -58,6 +60,74 @@ def parse_transaction_text(text: str) -> data.Transaction:
     if not isinstance(entry, data.Transaction):
         raise TransactionParseError("Expected exactly one transaction.")
     return entry
+
+
+@dataclass
+class SimplePosting:
+    """A posting representable in the structured postings UX (UX-08):
+    just an account and an optional amount/currency -- no cost basis, price
+    annotation, posting flag, or metadata.
+    """
+
+    account: str
+    amount: str = ""
+    currency: str = ""
+
+    def to_line(self) -> str:
+        """This posting as one ``PostingsArea`` source line, formatted
+        ``ACCOUNT  AMOUNT CURRENCY`` (matching the raw view's convention: a
+        double space separating the account from the amount, a single space
+        between the amount and its currency)."""
+        line = self.account
+        if self.amount:
+            line += f"  {self.amount}"
+            if self.currency:
+                line += f" {self.currency}"
+        return line
+
+
+def decompose_postings_text(postings_text: str) -> list[SimplePosting] | None:
+    """Try to decompose raw posting-lines text into `SimplePosting`s.
+
+    Used by the structured postings UX (UX-08) to load rows from the
+    raw-text ``PostingsArea``'s content when the user toggles views. Parses
+    ``postings_text`` with the real Beancount parser (wrapped in a throwaway
+    transaction header) rather than a bespoke line-format regex, so this
+    stays in exact agreement with what :func:`parse_transaction_text` will
+    later accept at save time -- one source of truth for what's valid,
+    shared by both the raw and structured views.
+
+    Returns ``None`` if any posting can't be represented structurally --
+    it has a cost basis (``{...}``), a price annotation (``@``), a posting
+    flag, or metadata -- so the caller can keep the raw-text view active
+    instead of losing or corrupting that posting's syntax.
+    """
+    body = "\n".join(
+        "  " + line.strip() for line in postings_text.splitlines() if line.strip()
+    )
+    if not body:
+        return []
+    placeholder = f'1970-01-01 * ""\n{body}\n'
+    try:
+        entry = parse_transaction_text(placeholder)
+    except TransactionParseError:
+        return None
+    result = []
+    for posting in entry.postings:
+        if posting.cost is not None or posting.price is not None or posting.flag is not None:
+            return None
+        extra_meta = {k for k in (posting.meta or {}) if k not in ("filename", "lineno")}
+        if extra_meta:
+            return None
+        if posting.units is MISSING:
+            result.append(SimplePosting(posting.account))
+        else:
+            result.append(
+                SimplePosting(
+                    posting.account, str(posting.units.number), posting.units.currency
+                )
+            )
+    return result
 
 
 def format_entry(entry: data.Directive) -> str:
