@@ -14,9 +14,10 @@ from pathlib import Path
 from textual.app import ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Button, Input, Label, Select, Static, TextArea
+from textual.widgets import Button, Checkbox, Input, Label, Select, Static, TextArea
 
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
+from beancount_tui.widgets.budget_form import INTERVALS
 from beancount_tui.widgets.postings_area import PostingsArea
 
 
@@ -78,6 +79,9 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         title: str = "New transaction",
         files: list[Path] | None = None,
         accounts: list[str] | None = None,
+        recurring: bool = False,
+        recurring_interval: str = "monthly",
+        recurring_until: str = "",
     ) -> None:
         super().__init__()
         self._accounts = accounts or []
@@ -90,6 +94,13 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         self._title = title
         # Offer a target-file picker only when there is a real choice.
         self._files = files if files and len(files) > 1 else None
+        # FORECAST-03: guided "recurring template" fields layered on top of
+        # the free-text tags/links input above, rather than replacing it —
+        # see ``_with_recurring_tag`` for how the two are reconciled at save
+        # time.
+        self._recurring = recurring
+        self._recurring_interval = recurring_interval
+        self._recurring_until = recurring_until
 
     def compose(self) -> ComposeResult:
         with Vertical():
@@ -104,6 +115,27 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             yield Input(value=self._narration, id="narration")
             yield Label("Tags / links (e.g. #vacation ^receipt-123)", classes="field-label")
             yield Input(value=self._tags_links, id="tags_links", placeholder="(optional)")
+            yield Checkbox("Recurring template", value=self._recurring, id="recurring")
+            interval_label = Label(
+                "Recurring interval", classes="field-label", id="recurring-interval-label"
+            )
+            interval_select = Select(
+                INTERVALS, value=self._recurring_interval, allow_blank=False, id="recurring-interval"
+            )
+            until_label = Label(
+                "Repeat until (optional)", classes="field-label", id="recurring-until-label"
+            )
+            until_input = Input(
+                value=self._recurring_until,
+                id="recurring-until",
+                placeholder="YYYY-MM-DD (optional)",
+            )
+            for widget in (interval_label, interval_select, until_label, until_input):
+                widget.display = self._recurring
+            yield interval_label
+            yield interval_select
+            yield until_label
+            yield until_input
             yield Label(
                 "Postings (one per line: ACCOUNT  AMOUNT CURRENCY; Tab completes accounts)",
                 classes="field-label",
@@ -122,6 +154,20 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
                 yield Button("Cancel", id="cancel")
                 yield Button("Save", id="save", variant="primary")
 
+    def on_checkbox_changed(self, event: Checkbox.Changed) -> None:
+        if event.checkbox.id != "recurring":
+            return
+        self._set_recurring_fields_visible(event.value)
+
+    def _set_recurring_fields_visible(self, visible: bool) -> None:
+        for widget_id in (
+            "#recurring-interval-label",
+            "#recurring-interval",
+            "#recurring-until-label",
+            "#recurring-until",
+        ):
+            self.query_one(widget_id).display = visible
+
     def _assemble_text(self) -> str:
         date = self.query_one("#date", Input).value.strip()
         flag = self.query_one("#flag", Input).value.strip() or "*"
@@ -129,15 +175,35 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         narration = self.query_one("#narration", Input).value.strip()
         tags_links = self.query_one("#tags_links", Input).value.strip()
         postings = self.query_one("#postings", TextArea).text
+        recurring = self.query_one("#recurring", Checkbox).value
+
+        if recurring:
+            tags_links = _with_recurring_tag(tags_links)
 
         quoted_payee = f' "{payee}"' if payee else ""
         header = f'{date} {flag}{quoted_payee} "{narration}"'
         if tags_links:
             header += f" {tags_links}"
+
+        # Transaction-level metadata (``recurring-freq``/``recurring-until``)
+        # must appear immediately after the header and before any posting
+        # lines — Beancount attaches metadata that follows a posting to that
+        # posting instead of the transaction (see module/FORECAST-03 notes).
+        meta_lines: list[str] = []
+        if recurring:
+            interval = str(self.query_one("#recurring-interval", Select).value)
+            meta_lines.append(f'  recurring-freq: "{interval}"')
+            until = self.query_one("#recurring-until", Input).value.strip()
+            if until:
+                meta_lines.append(f'  recurring-until: "{until}"')
+
         body = "\n".join(
             "  " + line.strip() for line in postings.splitlines() if line.strip()
         )
-        return f"{header}\n{body}\n"
+        lines = [header, *meta_lines]
+        if body:
+            lines.append(body)
+        return "\n".join(lines) + "\n"
 
     def _file_label(self, file: Path) -> str:
         assert self._files
@@ -148,6 +214,16 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             return str(file)
 
     def _save(self) -> None:
+        if self.query_one("#recurring", Checkbox).value:
+            until = self.query_one("#recurring-until", Input).value.strip()
+            if until:
+                try:
+                    datetime.date.fromisoformat(until)
+                except ValueError:
+                    self.query_one("#error", Static).update(
+                        f'Invalid "repeat until" date "{until}": expected YYYY-MM-DD.'
+                    )
+                    return
         text = self._assemble_text()
         try:
             parse_transaction_text(text)
@@ -167,3 +243,20 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+def _with_recurring_tag(tags_links: str) -> str:
+    """Ensure ``#recurring`` is present in ``tags_links``, without duplicating it.
+
+    The recurring toggle always wants ``#recurring`` in the final tags, but
+    the free-text tags/links field (``tags_links``) may already have it —
+    typed manually, or pre-filled from an existing recurring transaction's
+    own tags (see ``app._tags_links_text``). De-duping on the token itself
+    (rather than e.g. always appending) means toggling recurring on for a
+    transaction that already has ``#recurring`` typed doesn't produce
+    ``#recurring #recurring`` in the assembled header.
+    """
+    tokens = tags_links.split()
+    if "#recurring" in tokens:
+        return tags_links
+    return (tags_links + " #recurring").strip()
