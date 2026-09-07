@@ -2686,6 +2686,40 @@ async def test_account_tree_no_converted_total_when_single_operating_currency(le
         assert "≈" not in tree._amounts[checking.id]
 
 
+async def test_account_tree_starts_fully_expanded(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one(AccountTree)
+        assert tree.root.is_expanded
+        food = _find_node(tree.root, "Expenses:Food")
+        assert food is not None
+        assert food.is_expanded
+
+
+async def test_account_tree_collapse_survives_reload(ledger_path):
+    # RPT-08: manually collapsing a node shouldn't be wiped out the next
+    # time update_accounts runs (reload/filter change/account selection all
+    # rebuild the tree from scratch).
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        tree = app.query_one(AccountTree)
+        food = _find_node(tree.root, "Expenses:Food")
+        assert food is not None
+        food.collapse()
+        assert not food.is_expanded
+
+        # Simulate a reload (also exercised via action_reload/refresh_views).
+        tree.update_accounts(app.ledger.root_account(), app.ledger)
+
+        food = _find_node(tree.root, "Expenses:Food")
+        assert food is not None
+        assert not food.is_expanded
+        # Siblings that weren't collapsed should remain expanded.
+        assert tree.root.is_expanded
+
+
 def _find_node(node, account):
     if node.data == account:
         return node
