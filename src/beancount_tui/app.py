@@ -33,6 +33,7 @@ from beancount_tui.widgets.budget_screen import BudgetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
+from beancount_tui.widgets.document_preview import DocumentPreviewScreen
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.forecast_screen import ForecastScreen
 from beancount_tui.widgets.help_screen import HelpScreen
@@ -182,6 +183,7 @@ class BeancountTUI(App):
         ("b", "trial_balance", "Trial balance"),
         ("B", "balance_directive", "Balance now"),
         ("p", "pad_and_verify", "Pad and verify"),
+        ("P", "preview_document", "Preview document"),
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
         ("G", "budget", "Budget vs actual"),
@@ -850,6 +852,20 @@ class BeancountTUI(App):
             ConfirmDialog(f"Delete {_entry_summary(entry)}?", confirm_label="Delete"),
             on_result,
         )
+
+    def action_preview_document(self) -> None:
+        """Preview the file a highlighted `document` directive points at
+        (RPT-11), without leaving the TUI.
+
+        A no-op (with a warning notification) for anything other than a
+        `data.Document` row -- there's no file to preview for a
+        transaction or any other directive.
+        """
+        entry = self.query_one(TransactionTable).selected_entry
+        if not isinstance(entry, data.Document):
+            self.notify("No document selected.", severity="warning")
+            return
+        self.push_screen(DocumentPreviewScreen(Path(entry.filename)))
 
     def action_cycle_flag(self) -> None:
         """Toggle the highlighted transaction's flag between `*` (cleared)

@@ -19,6 +19,7 @@ from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
+from beancount_tui.widgets.document_preview import DocumentPreviewScreen
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
@@ -1689,6 +1690,39 @@ def test_document_directive_row_flags_missing_file(tmp_path):
     assert missing_summary == f"! Assets:Checking: {missing}"
 
 
+def test_render_document_preview_text_file(tmp_path):
+    from beancount_tui.widgets.document_preview import render_document_preview
+
+    doc_file = tmp_path / "receipt.txt"
+    doc_file.write_text("Coffee shop\n2.50 USD\n", encoding="utf-8")
+
+    text = render_document_preview(doc_file)
+    assert text == "Coffee shop\n2.50 USD\n"
+
+
+def test_render_document_preview_binary_file_shows_metadata(tmp_path):
+    from beancount_tui.widgets.document_preview import render_document_preview
+
+    doc_file = tmp_path / "scan.pdf"
+    doc_file.write_bytes(b"%PDF-1.4\x00\xff\xfe\x01\x02binary stuff\x00")
+
+    text = render_document_preview(doc_file)
+    assert "preview unavailable" in text
+    assert f"Size: {doc_file.stat().st_size} B" in text
+    assert "Modified:" in text
+    # No raw bytes leaked into the message.
+    assert "\x00" not in text
+
+
+def test_render_document_preview_missing_file(tmp_path):
+    from beancount_tui.widgets.document_preview import render_document_preview
+
+    doc_file = tmp_path / "gone.pdf"
+
+    text = render_document_preview(doc_file)
+    assert text == f"File not found: {doc_file}"
+
+
 async def test_add_document_directive(ledger_path):
     receipt = ledger_path.parent / "receipt.pdf"
     receipt.write_text("dummy", encoding="utf-8")
@@ -1711,6 +1745,102 @@ async def test_add_document_directive(ledger_path):
     assert not ledger.errors
     documents = [e for e in ledger.entries if isinstance(e, data.Document)]
     assert any(d.account == "Assets:Checking" and d.filename == str(receipt) for d in documents)
+
+
+async def test_preview_document_shows_text_file_contents(ledger_path, tmp_path):
+    doc_file = tmp_path / "note.txt"
+    doc_file.write_text("Hello from a text file.\n", encoding="utf-8")
+    append_entry(ledger_path, f'2026-01-20 document Assets:Checking "{doc_file}"')
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")  # show directives too, so the document row appears
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        doc_row = next(
+            i for i, entry in enumerate(table.shown) if isinstance(entry, data.Document)
+        )
+        table.move_cursor(row=doc_row)
+
+        await pilot.press("P")
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, DocumentPreviewScreen)
+        text = str(screen.query_one("#preview", Static).render())
+        assert "Hello from a text file." in text
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, DocumentPreviewScreen)
+
+
+async def test_preview_document_binary_fallback_shows_metadata(ledger_path, tmp_path):
+    doc_file = tmp_path / "photo.bin"
+    doc_file.write_bytes(bytes([0, 1, 2, 255, 254, 253, 0, 128]))
+    append_entry(ledger_path, f'2026-01-20 document Assets:Checking "{doc_file}"')
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        doc_row = next(
+            i for i, entry in enumerate(table.shown) if isinstance(entry, data.Document)
+        )
+        table.move_cursor(row=doc_row)
+
+        await pilot.press("P")
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, DocumentPreviewScreen)
+        text = str(screen.query_one("#preview", Static).render())
+        # No raw bytes dumped -- a graceful message plus basic metadata instead.
+        assert "preview unavailable" in text
+        assert "Size:" in text
+        assert "Modified:" in text
+
+
+async def test_preview_document_missing_file_shows_not_found(ledger_path, tmp_path):
+    missing_file = tmp_path / "missing.pdf"
+    append_entry(ledger_path, f'2026-01-20 document Assets:Checking "{missing_file}"')
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("t")
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        doc_row = next(
+            i for i, entry in enumerate(table.shown) if isinstance(entry, data.Document)
+        )
+        table.move_cursor(row=doc_row)
+
+        await pilot.press("P")
+        await pilot.pause()
+
+        screen = app.screen
+        assert isinstance(screen, DocumentPreviewScreen)
+        text = str(screen.query_one("#preview", Static).render())
+        assert "File not found" in text
+        assert str(missing_file) in text
+
+
+async def test_preview_document_noop_on_non_document_row(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=0)
+        assert not isinstance(table.selected_entry, data.Document)
+
+        await pilot.press("P")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, DocumentPreviewScreen)
 
 
 async def test_add_commodity_directive(ledger_path):
