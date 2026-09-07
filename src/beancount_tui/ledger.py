@@ -63,6 +63,39 @@ class IncomeStatement:
 
 
 @dataclass
+class IncomeStatementComparison:
+    """Multi-period income statement (RPT-09): one column per period.
+
+    Built by ``Ledger.income_statement_comparison`` from 2+ independently
+    computed ``IncomeStatement``s, then aligned into a single row per
+    account — the sorted union of every period's accounts — with one
+    ``Inventory`` entry per period position, in the same order as
+    ``periods``. A period where a given account had no activity gets an
+    empty ``Inventory()`` in that slot rather than omitting the column,
+    so every row in ``income``/``expenses`` always has exactly
+    ``len(periods)`` entries, and a caller can zip a row's balances
+    against ``periods`` positionally without checking for gaps.
+
+    ``periods`` are display labels (e.g. ``"month"``, ``"last-month"``,
+    or an explicit ``"2026-01-01..2026-01-31"`` range), one per
+    requested period, in request order — column headers, not the
+    resolved dates themselves (the caller already has those). ``income``/
+    ``expenses`` follow the same reporting convention as
+    ``IncomeStatement`` (income sign-inverted so revenue reads positive);
+    ``income_total``/``expenses_total``/``net`` are that same period's
+    totals from the underlying single-period statement, one per period,
+    same order as ``periods``.
+    """
+
+    periods: list[str]
+    income: list[tuple[str, list[Inventory]]]
+    expenses: list[tuple[str, list[Inventory]]]
+    income_total: list[Inventory]
+    expenses_total: list[Inventory]
+    net: list[Inventory]
+
+
+@dataclass
 class BalanceSheet:
     """Per-account and total Assets/Liabilities/Equity balances as of a date.
 
@@ -1212,6 +1245,75 @@ class Ledger:
         net.add_inventory(-expenses_total)
         return IncomeStatement(income, expenses, income_total, expenses_total, net)
 
+    def income_statement_comparison(
+        self,
+        periods: list[tuple[datetime.date | None, datetime.date | None]],
+        labels: list[str] | None = None,
+    ) -> IncomeStatementComparison:
+        """Multi-period income statement (RPT-09): one column per period.
+
+        ``periods`` is 2+ ``(start, end)`` tuples, each resolved exactly
+        the way single-period ``income_statement`` already resolves its
+        own ``start``/``end`` — built from RPT-03's preset tokens
+        (``month``, ``last-month``, ``year``, ``last-year`` via
+        ``resolve_date_preset``) or an explicit range (``parse_date_range``),
+        or passed as raw dates directly; this method itself is agnostic to
+        how a caller derived them (see ``parse_periods`` for the
+        comma-separated-text convenience the report screen uses). ``labels``
+        are the display strings for the resulting columns, same length and
+        order as ``periods``; if omitted, each period gets an
+        ``"START..END"`` label (either side blank when that bound is
+        ``None``, matching ``income_statement``'s own "open-ended" meaning).
+
+        Each period is computed independently via ``income_statement`` — so
+        single-period semantics (sign inversion, ``#recurring`` exclusion,
+        the "one account, multiple currencies coexist" idiom) are shared,
+        never reimplemented here — then the per-period results are aligned
+        into ``IncomeStatementComparison`` rows: the sorted union of every
+        period's accounts, each with one ``Inventory`` entry per period
+        (an empty ``Inventory()`` standing in for a period where that
+        account had no activity, never a missing slot).
+
+        Existing single-period ``income_statement`` behavior/signature is
+        untouched — this is an additional mode. Raises ``ValueError`` if
+        fewer than 2 periods are given (or if ``labels`` is given with a
+        different length than ``periods``): a single period should just
+        call ``income_statement`` directly.
+        """
+        if len(periods) < 2:
+            raise ValueError(
+                "income_statement_comparison needs at least 2 periods "
+                f"(got {len(periods)}); use income_statement for a single period"
+            )
+        if labels is None:
+            labels = [_format_period_bounds(start, end) for start, end in periods]
+        elif len(labels) != len(periods):
+            raise ValueError(
+                f"labels ({len(labels)}) must match periods ({len(periods)}) in length"
+            )
+
+        statements = [self.income_statement(start, end) for start, end in periods]
+
+        def _align(section: str) -> list[tuple[str, list[Inventory]]]:
+            per_period_maps = [dict(getattr(stmt, section)) for stmt in statements]
+            accounts = sorted({account for section_map in per_period_maps for account in section_map})
+            return [
+                (
+                    account,
+                    [section_map.get(account, Inventory()) for section_map in per_period_maps],
+                )
+                for account in accounts
+            ]
+
+        return IncomeStatementComparison(
+            periods=labels,
+            income=_align("income"),
+            expenses=_align("expenses"),
+            income_total=[stmt.income_total for stmt in statements],
+            expenses_total=[stmt.expenses_total for stmt in statements],
+            net=[stmt.net for stmt in statements],
+        )
+
     def trial_balance(self, as_of: datetime.date | None = None) -> list[tuple[str, Inventory]]:
         """Nonzero balances for every account, as of ``as_of`` (default: today).
 
@@ -1709,6 +1811,55 @@ def parse_date_range(
     if start is None and end is None:
         return None
     return start, end
+
+
+def _format_period_bounds(start: datetime.date | None, end: datetime.date | None) -> str:
+    """Fallback display label for a period with no explicit label (RPT-09).
+
+    Mirrors the ``START..END`` text a user would type to get this same
+    range via ``parse_date_range``, with either side blank when that bound
+    is ``None`` (open-ended), so a label auto-derived here round-trips
+    back through the same parser a user-supplied label would.
+    """
+    start_text = start.isoformat() if start is not None else ""
+    end_text = end.isoformat() if end is not None else ""
+    return f"{start_text}..{end_text}"
+
+
+def parse_periods(
+    text: str, today: datetime.date | None = None
+) -> list[tuple[str, datetime.date | None, datetime.date | None]] | None:
+    """Parse a comma-separated list of periods for RPT-09 comparison mode.
+
+    Each comma-separated segment is parsed exactly like a single-period
+    filter query (:func:`parse_date_range`): a quick preset token
+    (``month``, ``last-month``, ``year``, ``last-year``) or an explicit
+    ``START..END`` range, either side optional. E.g. ``"month,last-month"``
+    or ``"2026-01-01..2026-01-31,2026-02-01..2026-02-28"``. Blank segments
+    (from stray commas/whitespace) are dropped before counting.
+
+    Returns ``None`` if fewer than 2 non-blank segments remain, or if ANY
+    segment fails to parse as a date range — the whole input is rejected
+    rather than silently dropping the bad segment, the same
+    all-or-nothing convention ``FilterBar``/``parse_date_range`` already
+    use for a single malformed range. On success, returns one
+    ``(label, start, end)`` triple per segment, in the order given, where
+    ``label`` is that segment's own trimmed original text — used as-is
+    for the comparison table's column header, so a user's preset token or
+    explicit range is recognizable in the header rather than re-rendered.
+    """
+    segments = [segment.strip() for segment in text.split(",")]
+    segments = [segment for segment in segments if segment]
+    if len(segments) < 2:
+        return None
+    periods: list[tuple[str, datetime.date | None, datetime.date | None]] = []
+    for segment in segments:
+        date_range = parse_date_range(segment, today=today)
+        if date_range is None:
+            return None
+        start, end = date_range
+        periods.append((segment, start, end))
+    return periods
 
 
 def format_inventory(inventory: Inventory) -> str:

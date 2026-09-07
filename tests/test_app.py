@@ -2160,6 +2160,65 @@ async def test_income_statement_screen(ledger_path):
         assert not isinstance(app.screen, IncomeStatementScreen)
 
 
+async def test_income_statement_screen_comparison_mode(ledger_path):
+    """RPT-09: comma-separated periods in the same ``#period`` input switch
+    the screen into multi-column comparison mode, one column per period."""
+    from textual.widgets import DataTable, Input
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("i")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, IncomeStatementScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        def column_headers():
+            table = screen.query_one("#report", DataTable)
+            return [str(column.label) for column in table.ordered_columns]
+
+        screen.query_one("#period", Input).value = (
+            "2026-01-01..2026-01-10,2026-01-11..2026-01-16"
+        )
+        await pilot.pause()
+
+        assert column_headers() == [
+            "Account",
+            "2026-01-01..2026-01-10",
+            "2026-01-11..2026-01-16",
+        ]
+        # Same manually-computed totals as
+        # test_income_statement_comparison_explicit_ranges.
+        assert "2,662.65 USD" in cells(1)
+        assert "-64.20 USD" in cells(2)
+        # Expenses:Rent only occurred in the first period -- its second
+        # column is an empty cell, not a missing row.
+        rent_row = next(i for i in range(len(cells(0))) if "Rent" in cells(0)[i])
+        assert cells(1)[rent_row] == "1,450.00 USD"
+        assert cells(2)[rent_row] == ""
+
+        # An invalid period list (only one segment recognized, or an
+        # unparseable one) shows an error and keeps the last report.
+        screen.query_one("#period", Input).value = "month,not-a-period"
+        await pilot.pause()
+        assert "2,662.65 USD" in cells(1)
+
+        # Clearing the input reverts to the ordinary single-period,
+        # two-column table -- comparison mode doesn't stick around.
+        screen.query_one("#period", Input).value = ""
+        await pilot.pause()
+        assert column_headers() == ["Account", "Amount"]
+        assert "2,598.45 USD" in cells(1)  # net over all dates, single period
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, IncomeStatementScreen)
+
+
 async def test_budget_screen(ledger_path):
     from textual.widgets import DataTable, Input
 

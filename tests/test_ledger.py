@@ -19,6 +19,7 @@ from beancount_tui.ledger import (
     format_inventory,
     format_query_value,
     parse_date_range,
+    parse_periods,
     resolve_date_preset,
     transaction_amount,
 )
@@ -267,6 +268,46 @@ def test_parse_date_range_explicit_range_unaffected_by_today(fixed_today):
     )
 
 
+def test_parse_periods_preset_tokens(fixed_today):
+    assert parse_periods("month,last-month", today=fixed_today) == [
+        ("month", datetime.date(2026, 3, 1), fixed_today),
+        ("last-month", datetime.date(2026, 2, 1), datetime.date(2026, 2, 28)),
+    ]
+
+
+def test_parse_periods_explicit_ranges(fixed_today):
+    assert parse_periods(
+        "2026-01-01..2026-01-31,2026-02-01..2026-02-28", today=fixed_today
+    ) == [
+        ("2026-01-01..2026-01-31", datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)),
+        ("2026-02-01..2026-02-28", datetime.date(2026, 2, 1), datetime.date(2026, 2, 28)),
+    ]
+
+
+def test_parse_periods_mixed_tokens_and_ranges(fixed_today):
+    assert parse_periods("year,2026-01-01..2026-01-10", today=fixed_today) == [
+        ("year", datetime.date(2026, 1, 1), fixed_today),
+        ("2026-01-01..2026-01-10", datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)),
+    ]
+
+
+def test_parse_periods_ignores_blank_segments(fixed_today):
+    assert parse_periods("month, ,last-month,", today=fixed_today) == parse_periods(
+        "month,last-month", today=fixed_today
+    )
+
+
+def test_parse_periods_rejects_fewer_than_two_periods(fixed_today):
+    assert parse_periods("month", today=fixed_today) is None
+    assert parse_periods("", today=fixed_today) is None
+
+
+def test_parse_periods_rejects_any_invalid_segment(fixed_today):
+    # The whole list is rejected if any one segment fails to parse, rather
+    # than silently dropping just the bad one.
+    assert parse_periods("month,not-a-period", today=fixed_today) is None
+
+
 def test_filter_transactions_with_month_preset(ledger_path):
     ledger = Ledger.load(ledger_path)
     txns = ledger.transactions
@@ -313,6 +354,193 @@ def test_income_statement_date_range(ledger_path):
         "Expenses:Rent",
     }
     assert format_inventory(stmt.net) == "-1,537.35 USD"
+
+
+def test_income_statement_comparison_requires_at_least_two_periods(ledger_path):
+    """RPT-09: comparison mode is additive, not a replacement -- a single
+    period should just call ``income_statement`` directly, and this method
+    says so via ``ValueError`` rather than silently degrading."""
+    ledger = Ledger.load(ledger_path)
+    with pytest.raises(ValueError, match="at least 2 periods"):
+        ledger.income_statement_comparison([(None, None)])
+
+
+def test_income_statement_comparison_labels_length_mismatch(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    with pytest.raises(ValueError, match="labels"):
+        ledger.income_statement_comparison(
+            [(None, None), (None, None)], labels=["only-one"]
+        )
+
+
+def test_income_statement_comparison_explicit_ranges(ledger_path):
+    """RPT-09: two explicit ``(start, end)`` ranges carved out of the same
+    example ledger, manually computed:
+
+    - 2026-01-01..2026-01-10: opening balance (not income/expense), the
+      4,200.00 USD salary (01-05), 87.35 USD groceries (01-06), and
+      1,450.00 USD rent (01-10). Net = 4,200.00 - 87.35 - 1,450.00 =
+      2,662.65 USD.
+    - 2026-01-11..2026-01-16: only the 64.20 USD restaurant dinner
+      (01-14) falls in range (the savings transfer and balance
+      assertion aren't income/expense postings). Net = -64.20 USD.
+
+    The accounts touched don't fully overlap (Groceries/Rent only in the
+    first period, Restaurant only in the second), which is exactly what
+    exercises the alignment behavior: an account missing from one
+    period's underlying ``income_statement`` still gets a row with an
+    empty ``Inventory`` in that period's slot, not a missing column.
+    """
+    ledger = Ledger.load(ledger_path)
+    comparison = ledger.income_statement_comparison(
+        [
+            (datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)),
+            (datetime.date(2026, 1, 11), datetime.date(2026, 1, 16)),
+        ],
+        labels=["first-half", "second-half"],
+    )
+    assert comparison.periods == ["first-half", "second-half"]
+
+    income_by_account = dict(comparison.income)
+    assert set(income_by_account) == {"Income:Salary"}
+    assert [format_inventory(b) for b in income_by_account["Income:Salary"]] == [
+        "4,200.00 USD",
+        "",
+    ]
+
+    expenses_by_account = dict(comparison.expenses)
+    assert set(expenses_by_account) == {
+        "Expenses:Food:Groceries",
+        "Expenses:Food:Restaurant",
+        "Expenses:Rent",
+    }
+    assert [format_inventory(b) for b in expenses_by_account["Expenses:Food:Groceries"]] == [
+        "87.35 USD",
+        "",
+    ]
+    assert [format_inventory(b) for b in expenses_by_account["Expenses:Rent"]] == [
+        "1,450.00 USD",
+        "",
+    ]
+    assert [format_inventory(b) for b in expenses_by_account["Expenses:Food:Restaurant"]] == [
+        "",
+        "64.20 USD",
+    ]
+
+    assert [format_inventory(t) for t in comparison.income_total] == ["4,200.00 USD", ""]
+    assert [format_inventory(t) for t in comparison.expenses_total] == [
+        "1,537.35 USD",
+        "64.20 USD",
+    ]
+    assert [format_inventory(t) for t in comparison.net] == ["2,662.65 USD", "-64.20 USD"]
+
+    # Single-period behavior is untouched by the comparison mode existing.
+    single = ledger.income_statement(
+        start=datetime.date(2026, 1, 1), end=datetime.date(2026, 1, 10)
+    )
+    assert format_inventory(single.net) == "2,662.65 USD"
+
+
+def test_income_statement_comparison_auto_labels(ledger_path):
+    """Without explicit ``labels``, each period gets a ``START..END`` label
+    that round-trips through ``parse_date_range``."""
+    ledger = Ledger.load(ledger_path)
+    comparison = ledger.income_statement_comparison(
+        [
+            (datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)),
+            (datetime.date(2026, 1, 11), None),
+        ]
+    )
+    assert comparison.periods == ["2026-01-01..2026-01-10", "2026-01-11.."]
+
+
+def test_income_statement_comparison_month_over_month(tmp_path):
+    """RPT-09's headline acceptance criterion: a month-over-month
+    comparison built from RPT-03's preset tokens (``month``/``last-month``),
+    checked against manually computed per-period totals.
+
+    With ``today`` fixed at 2026-03-15, ``last-month`` resolves to all of
+    February and ``month`` resolves to March 1st through the 15th (see
+    ``resolve_date_preset``). The fixture ledger below has:
+
+    - February: a 3,000.00 USD salary (02-05), 150.00 USD groceries
+      (02-10), and 1,200.00 USD rent (02-15).
+      Net = 3,000.00 - 150.00 - 1,200.00 = 1,650.00 USD.
+    - March (through the 15th): a 3,200.00 USD salary (03-05) and
+      200.00 USD groceries (03-12); no rent transaction this month, which
+      is exactly what exercises "missing account -> empty column" for
+      Expenses:Rent in the March slot.
+      Net = 3,200.00 - 200.00 = 3,000.00 USD.
+    """
+    today = datetime.date(2026, 3, 15)
+    ledger_file = tmp_path / "ledger.beancount"
+    ledger_file.write_text(
+        'option "operating_currency" "USD"\n'
+        "\n"
+        "2026-01-01 open Assets:Checking          USD\n"
+        "2026-01-01 open Income:Salary            USD\n"
+        "2026-01-01 open Expenses:Food:Groceries  USD\n"
+        "2026-01-01 open Expenses:Rent            USD\n"
+        "\n"
+        '2026-02-05 * "Employer" "Salary"\n'
+        "  Assets:Checking  3000.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-02-10 * "Store" "Groceries"\n'
+        "  Expenses:Food:Groceries  150.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-02-15 * "Landlord" "Rent"\n'
+        "  Expenses:Rent  1200.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-03-05 * "Employer" "Salary"\n'
+        "  Assets:Checking  3200.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-03-12 * "Store" "Groceries"\n'
+        "  Expenses:Food:Groceries  200.00 USD\n"
+        "  Assets:Checking\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(ledger_file)
+    assert not ledger.errors
+
+    periods = parse_periods("month,last-month", today=today)
+    assert periods is not None
+    comparison = ledger.income_statement_comparison(
+        periods=[(start, end) for _, start, end in periods],
+        labels=[label for label, _, _ in periods],
+    )
+    assert comparison.periods == ["month", "last-month"]
+
+    income_by_account = dict(comparison.income)
+    assert [format_inventory(b) for b in income_by_account["Income:Salary"]] == [
+        "3,200.00 USD",
+        "3,000.00 USD",
+    ]
+
+    expenses_by_account = dict(comparison.expenses)
+    assert [format_inventory(b) for b in expenses_by_account["Expenses:Food:Groceries"]] == [
+        "200.00 USD",
+        "150.00 USD",
+    ]
+    # No March rent transaction in the fixture -- the "month" column must
+    # be an empty (not zero-valued-but-present, not missing) slot.
+    assert [format_inventory(b) for b in expenses_by_account["Expenses:Rent"]] == [
+        "",
+        "1,200.00 USD",
+    ]
+
+    assert [format_inventory(t) for t in comparison.income_total] == [
+        "3,200.00 USD",
+        "3,000.00 USD",
+    ]
+    assert [format_inventory(t) for t in comparison.expenses_total] == [
+        "200.00 USD",
+        "1,350.00 USD",
+    ]
+    assert [format_inventory(t) for t in comparison.net] == ["3,000.00 USD", "1,650.00 USD"]
 
 
 def test_balance_sheet_all_accounts(ledger_path):
