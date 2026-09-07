@@ -53,6 +53,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         border: round $primary;
         padding: 1 2;
         background: $surface;
+        overflow-y: auto;
     }
     TransactionForm .field-label {
         margin-top: 1;
