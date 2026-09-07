@@ -196,7 +196,7 @@ class BeancountTUI(App):
         ("G", "budget", "Budget vs actual"),
         ("F", "forecast", "Cash-flow forecast"),
         ("w", "holdings", "Holdings"),
-        ("P", "price_history", "Price history"),
+        ("H", "price_history", "Price history"),
         ("L", "ledger_info", "Ledger info"),
         ("Q", "query_runner", "Query"),
         ("m", "import_csv", "Import CSV"),

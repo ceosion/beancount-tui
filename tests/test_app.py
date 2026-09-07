@@ -2809,7 +2809,7 @@ async def test_price_history_screen(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("P")
+        await pilot.press("H")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, PriceHistoryScreen)
@@ -2839,7 +2839,7 @@ async def test_price_history_screen_no_priced_commodities(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
         await pilot.pause()
-        await pilot.press("P")
+        await pilot.press("H")
         await pilot.pause()
         screen = app.screen
         assert isinstance(screen, PriceHistoryScreen)
