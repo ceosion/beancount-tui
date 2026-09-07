@@ -15,6 +15,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Static
 
+from beancount_tui.config import DEFAULT_WATCH_INTERVAL, default_config_path, load_config
 from beancount_tui.editor import (
     append_entry,
     delete_entry,
@@ -207,7 +208,9 @@ class BeancountTUI(App):
         ("question_mark", "help", "Help"),
     ]
 
-    def __init__(self, ledger_path: str | Path, watch_interval: float = 1.0) -> None:
+    def __init__(
+        self, ledger_path: str | Path, watch_interval: float = DEFAULT_WATCH_INTERVAL
+    ) -> None:
         super().__init__()
         self.ledger = Ledger.load(ledger_path)
         self.selected_account: str | None = None
@@ -1097,11 +1100,50 @@ def main() -> None:
     arg_parser = argparse.ArgumentParser(
         prog="beancount-tui", description="A terminal UI for editing Beancount ledgers."
     )
-    arg_parser.add_argument("ledger", help="Path to the Beancount ledger file")
+    arg_parser.add_argument(
+        "ledger",
+        nargs="?",
+        default=None,
+        help=(
+            "Path to the Beancount ledger file. Optional if a `default_ledger` is "
+            "set in the config file."
+        ),
+    )
+    arg_parser.add_argument(
+        "--config",
+        type=Path,
+        default=None,
+        help=(
+            "Path to a TOML config file (default: "
+            "~/.config/beancount-tui/config.toml, if present)"
+        ),
+    )
+    arg_parser.add_argument(
+        "--watch-interval",
+        type=float,
+        default=None,
+        help="Seconds between checks for external changes to the ledger (overrides config file)",
+    )
     args = arg_parser.parse_args()
-    if not Path(args.ledger).is_file():
-        sys.exit(f"error: no such file: {args.ledger}")
-    BeancountTUI(args.ledger).run()
+
+    config_path = args.config if args.config is not None else default_config_path()
+    config = load_config(config_path)
+
+    ledger = args.ledger or config.get("default_ledger")
+    if not ledger:
+        arg_parser.error(
+            "no ledger path given, and no default_ledger configured in the config file"
+        )
+
+    watch_interval = (
+        args.watch_interval if args.watch_interval is not None else config.get("watch_interval")
+    )
+    if watch_interval is None:
+        watch_interval = DEFAULT_WATCH_INTERVAL
+
+    if not Path(ledger).is_file():
+        sys.exit(f"error: no such file: {ledger}")
+    BeancountTUI(ledger, watch_interval=watch_interval).run()
 
 
 if __name__ == "__main__":
