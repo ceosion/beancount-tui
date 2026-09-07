@@ -67,7 +67,7 @@ user's actual `~/.config/beancount-tui/`.
 
 ### CONFIG-02: Configurable key bindings
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** CONFIG-01
 - **Effort:** 2h
 
@@ -81,13 +81,60 @@ and refuse to start with a clear error message rather than silently
 letting one binding shadow another.
 
 **Acceptance criteria:**
-- [ ] A key binding can be remapped via the config file and takes effect
+- [x] A key binding can be remapped via the config file and takes effect
       on startup.
-- [ ] Unmapped actions keep their current default key.
-- [ ] Two actions mapped to the same key produce a clear startup error
+- [x] Unmapped actions keep their current default key.
+- [x] Two actions mapped to the same key produce a clear startup error
       rather than silent shadowing.
-- [ ] Test covering a remapped binding actually triggers the correct
+- [x] Test covering a remapped binding actually triggers the correct
       action, and that a conflicting config is rejected.
+
+**Implementation note:** `beancount_tui.config.resolve_bindings(default_bindings,
+overrides)` takes the hardcoded `(key, action, description)` list plus the
+config file's `[bindings]` table (`{action_name: key}`) and returns the
+rebuilt list, replacing the key for each named action while leaving its
+description and every unmapped action's key untouched. It calls `sys.exit`
+with a clear message for three misconfigurations, not just the
+one-key-two-actions case the acceptance criteria names: `[bindings]` not
+being a table, an override naming an action that doesn't exist (almost
+certainly a typo), and an override value that isn't a string — all
+deliberate extensions beyond the letter of the spec, since a silent typo in
+`[bindings]` would otherwise fail exactly as unhelpfully as the shadowing
+case the criteria call out.
+
+`app.py` now keeps the hardcoded defaults in a module-level
+`_DEFAULT_BINDINGS` constant (rather than only on
+`BeancountTUI.BINDINGS`), and `main()` calls a new `_rebuild_bindings(BeancountTUI,
+config.get("bindings", {}))` before constructing the app. This turned out
+to need more than just `BeancountTUI.BINDINGS = resolve_bindings(...)`:
+Textual resolves `BINDINGS` into a cached `cls._merged_bindings` exactly
+once, in `DOMNode.__init_subclass__` at class-definition (i.e.
+module-import) time, and builds each instance's actual key-dispatch table
+from that cache in `__init__` — reassigning `BINDINGS` afterwards silently
+has *no effect* on which key triggers what unless that cache is also
+recomputed. `_rebuild_bindings` therefore also reassigns
+`BeancountTUI._merged_bindings = BeancountTUI._merge_bindings()` (the
+private classmethod Textual itself uses to build that cache), which was
+confirmed by direct experimentation against the installed Textual version
+(8.2.8) to pick up a reassigned `BINDINGS` correctly. Using
+`_DEFAULT_BINDINGS` (rather than reading `BeancountTUI.BINDINGS` at
+rebuild time) as the base for every rebuild also means repeated calls
+(e.g. across tests in the same process) always start from the true
+defaults rather than compounding a previous run's overrides.
+
+Tests: `tests/test_config.py` covers `resolve_bindings` directly (remap
+applied, unmapped actions preserved, no-overrides no-op, and all four
+rejection cases above) plus two `app.main()`-level tests (bindings config
+reaching `BeancountTUI.BINDINGS` via the `_RecordingApp` stand-in already
+used for `CONFIG-01`'s tests, and a conflicting config raising
+`SystemExit` before the app is constructed). `tests/test_app.py` adds one
+full Textual-`Pilot` end-to-end test
+(`test_config_binding_override_triggers_remapped_action`) that remaps
+`help` to `ctrl+h`, confirms the *old* key (`?`) no longer opens
+`HelpScreen` and the *new* key does — proving the override reaches actual
+key dispatch, not just the `BINDINGS` data — and restores
+`BeancountTUI.BINDINGS`/`_merged_bindings` afterwards since both are
+mutated class-level state shared across the test module.
 
 ---
 

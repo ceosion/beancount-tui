@@ -3296,6 +3296,39 @@ async def test_help_screen(ledger_path):
         assert not isinstance(app.screen, HelpScreen)
 
 
+async def test_config_binding_override_triggers_remapped_action(ledger_path):
+    """`CONFIG-02`: a `[bindings]` override actually changes which key
+    triggers an action, end to end -- not just that `BINDINGS` (the data)
+    gets rebuilt, but that Textual's own key dispatch picks it up. The
+    default key (`?`) for the remapped action stops working, and the new
+    key (`ctrl+h`) takes over.
+
+    `BeancountTUI.BINDINGS`/`_merged_bindings` are class-level state
+    mutated by `_rebuild_bindings`, so this test carefully restores both
+    afterwards to avoid bleeding into other tests in this module.
+    """
+    from beancount_tui.app import _rebuild_bindings
+
+    original_bindings = BeancountTUI.BINDINGS
+    original_merged = BeancountTUI._merged_bindings
+    try:
+        _rebuild_bindings(BeancountTUI, {"help": "ctrl+h"})
+
+        app = BeancountTUI(ledger_path)
+        async with app.run_test() as pilot:
+            await pilot.pause()
+            await pilot.press("?")
+            await pilot.pause()
+            assert not isinstance(app.screen, HelpScreen)
+
+            await pilot.press("ctrl+h")
+            await pilot.pause()
+            assert isinstance(app.screen, HelpScreen)
+    finally:
+        BeancountTUI.BINDINGS = original_bindings
+        BeancountTUI._merged_bindings = original_merged
+
+
 async def test_account_tree_rolls_up_child_balances(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
