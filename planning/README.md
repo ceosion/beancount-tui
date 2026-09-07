@@ -37,6 +37,9 @@ everything it depends on is `done`, unless its notes say otherwise.
 | [tooling.md](tooling.md) | `TOOL` | Snapshot tests, CI matrix, coverage, packaging/publishing. |
 | [budgeting.md](budgeting.md) | `BUDGET` | Per-account budget targets via Fava's `custom "budget"` convention, proration, budget-vs-actual report. |
 | [forecasting.md](forecasting.md) | `FORECAST` | Recurring/scheduled transaction templates and a virtual (never-persisted) forward-looking cash-flow projection, blending templates with budget targets. |
+| [export.md](export.md) | `EXPORT` | CSV/JSON export for report and query-runner results, currently view-only. |
+| [config.md](config.md) | `CONFIG` | User config file, configurable key bindings, persisted theme selection. |
+| [performance.md](performance.md) | `PERF` | Large-ledger benchmarking, realization caching, async reload, incremental table updates. |
 
 ## Suggested order
 
@@ -58,6 +61,14 @@ Dependencies are authoritative; this is just a reasonable path through them:
    (creation form) can proceed in parallel with `FORECAST-04`→`FORECAST-06`
    (projection engine → budget fallback → report screen), which is itself a
    strict chain.
+7. `LANG-12`/`LANG-13`, `RPT-08`-`RPT-11`, `EXPORT`, `CONFIG`, and `PERF`
+   are all independent of each other and of the areas above (aside from
+   their own noted dependencies, e.g. `RPT-10` on `LANG-02`, `EXPORT-01` on
+   `RPT-06`). Within `PERF`, `PERF-01` (the benchmark fixture) should land
+   before `PERF-02`-`PERF-04`, since those are meant to demonstrate a
+   measured improvement against it rather than an assumed one. Within
+   `CONFIG`, `CONFIG-01` (the config file itself) is a hard dependency for
+   `CONFIG-02`/`CONFIG-03`.
 
 ## Baseline (already implemented, for context)
 
@@ -78,5 +89,5 @@ Not tracked as tasks — this is what v0.1 already shipped, per git history:
 
 ## Total scope
 
-52 tasks across 8 areas: 11 `LANG`, 7 `RPT`, 5 `EDIT`, 4 `IMP`, 8 `UX`, 4
-`TOOL`, 6 `BUDGET`, 7 `FORECAST`.
+67 tasks across 11 areas: 13 `LANG`, 11 `RPT`, 5 `EDIT`, 4 `IMP`, 8 `UX`, 4
+`TOOL`, 6 `BUDGET`, 7 `FORECAST`, 2 `EXPORT`, 3 `CONFIG`, 4 `PERF`.

@@ -233,3 +233,124 @@ computed dicts, when the single-leaf condition holds) at its existing
       multi-currency non-mixing, Cleared Balance correctness against a mix
       of `*`/`!`-flagged transactions, and balance correctness under a
       reversed sort.
+
+---
+
+### RPT-08: Collapsible account tree
+
+- **Status:** todo
+- **Depends on:** none
+- **Effort:** 1h
+
+**Description:** `AccountTree.update_accounts` force-expands every node on
+every rebuild (`_add_account_nodes` adds each child with `expand=True`,
+plus `update_accounts` itself calls `self.root.expand()`), and a rebuild
+happens on every reload/filter change/account selection via
+`refresh_views`. Textual's base `Tree` already ships per-node
+collapse/expand (`action_toggle_node`, bound to `space`) and
+collapse/expand-all-siblings (`action_toggle_expand_all`, `shift+space`)
+for free — nothing new needs to be built there. The actual bug is that any
+manual collapse a user makes is immediately wiped out the next time
+`update_accounts` runs, since it unconditionally re-expands everything.
+Fix by snapshotting which account paths are currently collapsed before
+`self.clear()`, and re-applying that state after rebuilding, rather than
+adding new collapse machinery.
+
+**Acceptance criteria:**
+- [ ] Collapsing a node in the sidebar survives a ledger reload, filter
+      change, or account selection (previously-collapsed accounts stay
+      collapsed).
+- [ ] A freshly loaded ledger still starts fully expanded (first-load
+      default is unchanged).
+- [ ] Existing `space`/`shift+space` collapse/expand bindings continue to
+      work.
+- [ ] Test covering: collapse an account, trigger `update_accounts` again
+      (simulating a reload), assert it's still collapsed.
+
+---
+
+### RPT-09: Multi-period comparison reports
+
+- **Status:** todo
+- **Depends on:** RPT-03
+- **Effort:** 2.5h
+
+**Description:** `Ledger.income_statement`/`trial_balance`/`balance_sheet`/
+`holdings` each take a single date/date-range, and their screens render
+exactly one period at a time via one `_render_report` call into one
+`DataTable` — no side-by-side month-over-month or this-year-vs-last-year
+view like Fava's period comparison exists anywhere. Add a comparison mode
+to `income_statement` first (the report where this matters most): accept
+a list of periods and render one column per period per account, building
+each period's `(start, end)` from `RPT-03`'s existing preset tokens
+(`month`, `last-month`, `year`, `last-year`) as well as explicit ranges.
+Keep the existing single-period call signature/behavior intact — this is
+an additional mode, not a replacement.
+
+**Acceptance criteria:**
+- [ ] A comparison mode accepts 2+ periods and renders a multi-column
+      table (one column per period) for the income statement.
+- [ ] Existing single-period `income_statement`/screen behavior is
+      unchanged when only one period is requested.
+- [ ] Period columns can be built from `RPT-03`'s preset tokens as well as
+      explicit ranges.
+- [ ] Test covering a known ledger's month-over-month comparison against
+      manually computed per-period totals.
+
+---
+
+### RPT-10: Commodity price history view
+
+- **Status:** todo
+- **Depends on:** LANG-02
+- **Effort:** 1.5h
+
+**Description:** `Ledger` only ever consumes `Price` directives via
+`build_price_map` for a single latest-rate lookup (`_price_map_cached`,
+used by `holdings()`/`converted_total()`) — there's no way to see a
+commodity's price over time, unlike Fava's price chart. Add a
+`Ledger.price_history(commodity) -> list[tuple[date, Decimal, str]]`
+method returning every `Price` entry for that commodity in date order
+(rate, quote currency), and a screen/binding showing it as a simple
+date-ordered table — a chart is out of scope, since Textual has no native
+charting widget and pulling in a plotting dependency is disproportionate
+for a TUI; a table is the pragmatic equivalent here. Let the user pick a
+commodity from those that actually have price history.
+
+**Acceptance criteria:**
+- [ ] New method returns a commodity's price entries in date order.
+- [ ] New screen/binding lists commodities with price history and shows
+      the selected one's full history as a table.
+- [ ] Commodities with no `Price` directives are excluded from the picker.
+- [ ] Test covering price-history output against a known ledger with
+      multiple `Price` entries for one commodity.
+
+---
+
+### RPT-11: Document preview modal
+
+- **Status:** todo
+- **Depends on:** none
+- **Effort:** 1.5h
+
+**Description:** `data.Document` rows already show account/filename and
+flag missing files (`_entry_row`'s Document handling, from `LANG-05`), but
+there's no way to view the referenced file's actual contents without
+leaving the TUI. Add an action that, when a `Document` row is selected,
+opens a modal previewing the file: render as plain text for text-like
+files (by extension or a quick content sniff), and for binary/unsupported
+files show a graceful fallback message with basic file metadata (size,
+modified time) rather than attempting to dump raw bytes. A row whose file
+is missing (already flagged with `!`) shows a "file not found" message
+instead of attempting to read it.
+
+**Acceptance criteria:**
+- [ ] Selecting a `Document` row and triggering the preview action opens a
+      modal showing the file's text contents (for text-like files).
+- [ ] Binary/unsupported files show a graceful fallback message with basic
+      file metadata instead of raw bytes or a crash.
+- [ ] A `Document` row whose file is missing shows a "file not found"
+      message instead of attempting to read it.
+- [ ] Test covering: text file preview content, binary fallback message,
+      and missing-file message, using fixture files under a temp ledger
+      directory.

@@ -252,3 +252,76 @@ this from `Ledger.options`.
 - [x] Shows the full list of source files (top-level + includes).
 - [x] Gracefully handles ledgers that don't set any of these (defaults only).
 - [x] Test covering the screen against the example ledger's options.
+
+---
+
+### LANG-12: Surface and create `plugin` directives
+
+- **Status:** todo
+- **Depends on:** LANG-01, LANG-11
+- **Effort:** 1.5h
+
+**Description:** Beancount's real loader (`loader.load_file`) already
+executes `plugin "module"` directives during parsing — plugin-generated
+entries (`auto_accounts`, `unrealized`, `sellgains`, etc.) come back fully
+baked into `entries` with zero special handling needed from
+beancount-tui, so nothing is silently dropped at the data level. The
+actual gap is narrower: `plugin` directives aren't `data.*` entries at all
+(there's no `data.Plugin` namedtuple — they're parsed into
+`options_map["plugin"]`, a list of `(name, config)` tuples, the same place
+`operating_currency` already lives), so (1) there's no UI showing which
+plugins are declared for the loaded ledger, and (2) `"plugin"` isn't one
+of the keywords in `_directive_template`/`DIRECTIVE_TYPES`
+(`directive_type_picker.py`), so a user can't add one without leaving the
+TUI. Add a `Ledger.plugins` accessor (`self.options.get("plugin", [])`,
+mirroring how `operating_currency` is read) and surface it in `LANG-11`'s
+`LedgerInfoScreen`; add `"plugin"` to the type picker with a template like
+`2026-09-06 plugin "beancount.plugins.auto_accounts"`, appended via the
+existing generic `append_entry` (plugin lines are plain text as far as
+appending goes). Editing/deleting an *existing* plugin line is explicitly
+out of scope here: `DirectiveForm`'s edit/delete flow locates entries via
+`.meta['filename']`/`.meta['lineno']` on a `data.Directive`, which plugin
+directives don't have — making that work would need new line-locating
+logic against raw file text rather than reusing the entry-object model
+every other directive type shares.
+
+**Acceptance criteria:**
+- [ ] `Ledger.plugins` returns the ledger's declared plugin names/configs.
+- [ ] `LedgerInfoScreen` lists declared plugins alongside existing options.
+- [ ] The add-directive picker can create a new `plugin` line (appended to
+      the target file) via the same file-picker/template mechanism as
+      other types.
+- [ ] Editing/deleting an existing `plugin` line is not attempted by this
+      task (documented as a follow-up, not a silent gap).
+- [ ] Test covering `Ledger.plugins` against a ledger with a `plugin`
+      directive, the info screen showing it, and a new plugin line
+      appending correctly via the add-directive flow.
+
+---
+
+### LANG-13: Harden plugin-load failure handling
+
+- **Status:** todo
+- **Depends on:** none
+- **Effort:** 1h
+
+**Description:** `beancount.loader.load_file`'s `run_transformations`
+already catches an ordinary exception from a failing plugin and turns it
+into a normal `BeancountError`, which surfaces fine through
+beancount-tui's existing `#errors` panel (`refresh_views` in `app.py`).
+But a plugin that calls `sys.exit(...)` raises `SystemExit`, which
+propagates out of `loader.load_file` uncaught — crashing `Ledger.load`/
+`reload` and the whole app instead of surfacing as a readable load error.
+Catch `SystemExit` around the `loader.load_file` call in `Ledger.load`/
+`reload` and convert it into the same kind of load-error entry the
+`#errors` panel already renders, so a misbehaving plugin degrades
+gracefully instead of taking down the TUI.
+
+**Acceptance criteria:**
+- [ ] A plugin calling `sys.exit(...)` during load no longer crashes the
+      app.
+- [ ] The failure surfaces in the existing `#errors` panel with a readable
+      message identifying the plugin.
+- [ ] Normal (non-plugin-related) load errors are unaffected.
+- [ ] Test covering load against a fixture ledger declaring a plugin that
+      raises `SystemExit`.
