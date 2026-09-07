@@ -125,6 +125,43 @@ class HoldingsReport:
 
 
 @dataclass
+class BudgetEntry:
+    """A parsed ``custom "budget"`` directive (Fava's convention).
+
+    Fava's shape is ``YYYY-MM-DD custom "budget" Account "interval" NN.NN
+    CCY``, currently stored by beancount as generic ``data.Custom.values``
+    (see ``Ledger._parse_budgets``). ``interval`` is canonicalized to one of
+    the five long forms (``daily``/``weekly``/``monthly``/``quarterly``/
+    ``yearly``) regardless of whether the directive spelled it out in long
+    or short form (``day``/``week``/``month``/``quarter``/``year``), so
+    downstream code (proration, in a later task) only ever has to handle
+    one spelling per interval.
+    """
+
+    date: datetime.date
+    account: str
+    interval: str
+    amount: data.Amount
+
+
+# Fava's five accepted interval spellings, long and short form, mapped to
+# their canonical long form. Matching is case-insensitive (see
+# ``Ledger._parse_budgets``).
+_BUDGET_INTERVALS = {
+    "daily": "daily",
+    "day": "daily",
+    "weekly": "weekly",
+    "week": "weekly",
+    "monthly": "monthly",
+    "month": "monthly",
+    "quarterly": "quarterly",
+    "quarter": "quarterly",
+    "yearly": "yearly",
+    "year": "yearly",
+}
+
+
+@dataclass
 class QueryResult:
     """The result of running a BQL query: column names plus row tuples.
 
@@ -154,16 +191,23 @@ class Ledger:
     options: dict = field(default_factory=dict)
     # Lazily built and cached; invalidated on reload. Not part of equality.
     _price_map: object = field(default=None, repr=False, compare=False)
+    # Parsed eagerly at load/reload time (see ``_parse_budgets``), not part
+    # of equality, since parsing appends to ``errors`` as a side effect and
+    # that shouldn't happen more than once per load.
+    _budgets: list = field(default_factory=list, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: str | Path) -> "Ledger":
         path = Path(path)
         entries, errors, options = loader.load_file(str(path))
-        return cls(path=path, entries=entries, errors=errors, options=options)
+        ledger = cls(path=path, entries=entries, errors=errors, options=options)
+        ledger._parse_budgets()
+        return ledger
 
     def reload(self) -> None:
         self.entries, self.errors, self.options = loader.load_file(str(self.path))
         self._price_map = None
+        self._parse_budgets()
 
     @property
     def transactions(self) -> list[data.Transaction]:
@@ -192,6 +236,65 @@ class Ledger:
                 for a in getters.get_entry_accounts(entry)
             )
         ]
+
+    @property
+    def budgets(self) -> list[BudgetEntry]:
+        """Parsed ``custom "budget"`` entries (see ``BudgetEntry``).
+
+        Populated at load/reload time by ``_parse_budgets``; a directive
+        with an unrecognized interval is excluded here and instead reported
+        via ``self.errors``, the same mechanism the beancount loader itself
+        uses for malformed entries — it never crashes ``Ledger.load``.
+        """
+        return self._budgets
+
+    def _parse_budgets(self) -> None:
+        """Parse ``custom "budget"`` entries into ``self._budgets``.
+
+        Filters ``self.entries`` for ``data.Custom`` entries typed
+        ``"budget"`` and extracts ``(account, interval, amount)`` from
+        ``entry.values`` (Fava's convention: an account value, a string
+        interval value, and an ``Amount`` value, in that order). Before
+        ``BUDGET-01``, any ``custom`` directive — including one typed
+        ``"budget"`` — was only ever handled generically (``LANG-06``), so a
+        ``budget``-typed entry that doesn't actually match this 3-value
+        shape is left alone (excluded from ``self.budgets``, generic
+        ``Custom`` display unaffected, no new error) rather than treated as
+        a broken budget. Only an entry that *does* match the shape but
+        whose interval string isn't one of Fava's five accepted values
+        (long or short form, case-insensitive — see ``_BUDGET_INTERVALS``)
+        is reported: as a ``loader.LoadError`` appended to ``self.errors``
+        (mirroring how the real beancount loader surfaces its own
+        validation errors), not a raised exception, and excluded from
+        ``self.budgets``.
+        """
+        budgets: list[BudgetEntry] = []
+        for entry in self.entries:
+            if not (isinstance(entry, data.Custom) and entry.type == "budget"):
+                continue
+            if len(entry.values) != 3:
+                continue
+            account = entry.values[0].value
+            raw_interval = entry.values[1].value
+            amount = entry.values[2].value
+            if not isinstance(account, str) or not isinstance(amount, data.Amount):
+                continue
+            interval = _BUDGET_INTERVALS.get(str(raw_interval).strip().lower())
+            if interval is None:
+                self.errors.append(
+                    loader.LoadError(
+                        entry.meta,
+                        f'Invalid budget interval "{raw_interval}": expected one of '
+                        "daily/weekly/monthly/quarterly/yearly "
+                        "(or day/week/month/quarter/year)",
+                        entry,
+                    )
+                )
+                continue
+            budgets.append(
+                BudgetEntry(date=entry.date, account=account, interval=interval, amount=amount)
+            )
+        self._budgets = budgets
 
     @property
     def queries(self) -> list[data.Query]:

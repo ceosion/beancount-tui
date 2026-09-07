@@ -8,6 +8,7 @@ from beancount.core import realization
 
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
+    BudgetEntry,
     Ledger,
     filter_transactions,
     format_inventory,
@@ -540,3 +541,70 @@ def test_ledger_queries_lists_query_directives(ledger_path):
     assert len(ledger.queries) == 1
     assert ledger.queries[0].name == "cash"
     assert ledger.queries[0].query_string == "SELECT account, sum(position) GROUP BY account"
+
+
+def test_budgets_empty_when_no_budget_directives(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.budgets == []
+
+
+def test_budgets_parses_all_five_intervals_long_and_short_form(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 custom "budget" Assets:Checking "daily" 10.00 USD\n'
+        '2026-02-01 custom "budget" Assets:Checking "day" 11.00 USD\n'
+        '2026-02-01 custom "budget" Assets:Savings "weekly" 70.00 USD\n'
+        '2026-02-01 custom "budget" Assets:Savings "week" 71.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Rent "monthly" 300.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Rent "month" 301.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Food:Groceries "quarterly" 900.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Food:Groceries "quarter" 901.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Food:Restaurant "YEARLY" 1200.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Food:Restaurant "Year" 1201.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert len(ledger.budgets) == 10
+    assert all(isinstance(b, BudgetEntry) for b in ledger.budgets)
+    assert all(b.date == datetime.date(2026, 2, 1) for b in ledger.budgets)
+
+    seen = {(b.account, b.interval, b.amount.number, b.amount.currency) for b in ledger.budgets}
+    # Long and short forms of the same interval canonicalize identically.
+    assert seen == {
+        ("Assets:Checking", "daily", Decimal("10.00"), "USD"),
+        ("Assets:Checking", "daily", Decimal("11.00"), "USD"),
+        ("Assets:Savings", "weekly", Decimal("70.00"), "USD"),
+        ("Assets:Savings", "weekly", Decimal("71.00"), "USD"),
+        ("Expenses:Rent", "monthly", Decimal("300.00"), "USD"),
+        ("Expenses:Rent", "monthly", Decimal("301.00"), "USD"),
+        ("Expenses:Food:Groceries", "quarterly", Decimal("900.00"), "USD"),
+        ("Expenses:Food:Groceries", "quarterly", Decimal("901.00"), "USD"),
+        ("Expenses:Food:Restaurant", "yearly", Decimal("1200.00"), "USD"),
+        ("Expenses:Food:Restaurant", "yearly", Decimal("1201.00"), "USD"),
+    }
+
+
+def test_budgets_invalid_interval_surfaces_as_error_not_crash(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 custom "budget" Expenses:Rent "fortnightly" 100.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert ledger.budgets == []
+    assert len(ledger.errors) == 1
+    assert "fortnightly" in ledger.errors[0].message
+    assert ledger.errors[0].entry.type == "budget"
+
+
+def test_budgets_invalid_interval_does_not_block_valid_ones(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 custom "budget" Expenses:Rent "monthly" 300.00 USD\n'
+        '2026-02-01 custom "budget" Expenses:Food:Groceries "fortnightly" 50.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    assert len(ledger.budgets) == 1
+    assert ledger.budgets[0].account == "Expenses:Rent"
+    assert ledger.budgets[0].interval == "monthly"
+    assert len(ledger.errors) == 1
+    assert "fortnightly" in ledger.errors[0].message
