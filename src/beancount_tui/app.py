@@ -10,6 +10,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from beancount.core import data, getters, realization
+from beancount.core.inventory import Inventory
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Static
@@ -233,9 +234,35 @@ class BeancountTUI(App):
             entries = list(self.ledger.transactions_for_account(self.selected_account))
         return filter_transactions(entries, self.filter_query)
 
+    def _account_running_balances(
+        self,
+    ) -> tuple[dict[int, Inventory] | None, dict[int, Inventory] | None]:
+        """Running/Cleared running balance dicts for ``self.selected_account``
+        (RPT-07), or ``(None, None)`` when neither applies.
+
+        Only meaningful for a single leaf account: "all accounts" (``None``)
+        and any account with descendants (a parent/non-leaf account, per
+        ``self.ledger.accounts``) both return ``(None, None)`` -- a running
+        balance across multiple accounts, or a whole subtree, isn't a single
+        coherent figure the way it is for one leaf account.
+        """
+        account = self.selected_account
+        if account is None:
+            return None, None
+        prefix = account + ":"
+        if any(a.startswith(prefix) for a in self.ledger.accounts):
+            return None, None
+        return (
+            self.ledger.running_balances(account),
+            self.ledger.running_balances(account, only_cleared=True),
+        )
+
     def refresh_views(self) -> None:
         self.query_one(AccountTree).update_accounts(self.ledger.root_account(), self.ledger)
-        self.query_one(TransactionTable).update_entries(self._visible_entries())
+        running_balances, cleared_balances = self._account_running_balances()
+        self.query_one(TransactionTable).update_entries(
+            self._visible_entries(), running_balances, cleared_balances
+        )
         self._update_detail_panel()
         error_panel = self.query_one("#errors", Static)
         if self.ledger.errors:
@@ -255,12 +282,18 @@ class BeancountTUI(App):
 
     def on_account_tree_account_selected(self, event: AccountTree.AccountSelected) -> None:
         self.selected_account = event.account
-        self.query_one(TransactionTable).update_entries(self._visible_entries())
+        running_balances, cleared_balances = self._account_running_balances()
+        self.query_one(TransactionTable).update_entries(
+            self._visible_entries(), running_balances, cleared_balances
+        )
         self._update_detail_panel()
 
     def action_toggle_directives(self) -> None:
         self.show_directives = not self.show_directives
-        self.query_one(TransactionTable).update_entries(self._visible_entries())
+        running_balances, cleared_balances = self._account_running_balances()
+        self.query_one(TransactionTable).update_entries(
+            self._visible_entries(), running_balances, cleared_balances
+        )
         self._update_detail_panel()
 
     def action_toggle_detail(self) -> None:
@@ -356,7 +389,10 @@ class BeancountTUI(App):
 
     def on_filter_bar_filter_changed(self, event: FilterBar.FilterChanged) -> None:
         self.filter_query = event.query
-        self.query_one(TransactionTable).update_entries(self._visible_entries())
+        running_balances, cleared_balances = self._account_running_balances()
+        self.query_one(TransactionTable).update_entries(
+            self._visible_entries(), running_balances, cleared_balances
+        )
         self._update_detail_panel()
 
     def on_filter_bar_filter_accepted(self, event: FilterBar.FilterAccepted) -> None:
@@ -367,7 +403,10 @@ class BeancountTUI(App):
         bar.value = ""
         bar.remove_class("visible")
         self.filter_query = ""
-        self.query_one(TransactionTable).update_entries(self._visible_entries())
+        running_balances, cleared_balances = self._account_running_balances()
+        self.query_one(TransactionTable).update_entries(
+            self._visible_entries(), running_balances, cleared_balances
+        )
         self._update_detail_panel()
         self.query_one(TransactionTable).focus()
 

@@ -3143,6 +3143,224 @@ async def test_sort_handles_non_transaction_directives_without_crashing(ledger_p
         assert table.row_count > 6
 
 
+# RPT-07: inline running/cleared balance columns.
+
+# Known chronological (date-ascending) sequence for Assets:Checking in
+# examples/example.beancount -- see test_register_running_balance in
+# test_ledger.py. Every transaction is "*"-flagged, so Cleared Balance
+# matches Balance exactly here.
+_CHECKING_RUNNING_BALANCES = [
+    "2,500.00 USD",
+    "6,700.00 USD",
+    "6,612.65 USD",
+    "5,162.65 USD",
+    "5,098.45 USD",
+    "4,098.45 USD",
+]
+
+
+def _select_account(app: BeancountTUI, account: str | None) -> None:
+    """Select ``account`` the same way clicking it in the sidebar would."""
+    app.on_account_tree_account_selected(AccountTree.AccountSelected(account))
+
+
+async def test_balance_columns_shown_for_leaf_account_default_sort(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        _select_account(app, "Assets:Checking")
+        await pilot.pause()
+
+        assert len(table.columns) == 7
+        assert "balance" in table.columns
+        assert "cleared_balance" in table.columns
+        balances = [str(table.get_row_at(i)[5]) for i in range(table.row_count)]
+        cleared = [str(table.get_row_at(i)[6]) for i in range(table.row_count)]
+        assert balances == _CHECKING_RUNNING_BALANCES
+        # Every transaction here is "*"-flagged, so Cleared Balance matches.
+        assert cleared == _CHECKING_RUNNING_BALANCES
+
+
+async def test_balance_columns_correct_under_explicit_date_sort(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        _select_account(app, "Assets:Checking")
+        await pilot.pause()
+
+        # Explicit date-ascending sort (header click on Date): same figures,
+        # same row order as the untouched default.
+        table.on_data_table_header_selected(_header_selected(table, 0))
+        await pilot.pause()
+        assert len(table.columns) == 7
+        balances = [str(table.get_row_at(i)[5]) for i in range(table.row_count)]
+        assert balances == _CHECKING_RUNNING_BALANCES
+
+        # Reversing to date-descending must show the *same* chronologically
+        # -correct balances, now against reversed rows -- balances are always
+        # computed earliest-to-latest regardless of display order.
+        table.on_data_table_header_selected(_header_selected(table, 0))
+        await pilot.pause()
+        assert len(table.columns) == 7
+        balances_desc = [str(table.get_row_at(i)[5]) for i in range(table.row_count)]
+        assert balances_desc == list(reversed(_CHECKING_RUNNING_BALANCES))
+
+
+async def test_balance_columns_hidden_for_parent_account(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        # "Expenses:Food" has descendants (Groceries, Restaurant): not a leaf.
+        _select_account(app, "Expenses:Food")
+        await pilot.pause()
+        assert len(table.columns) == 5
+        assert "balance" not in table.columns
+
+
+async def test_balance_columns_hidden_for_no_account_selected(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert app.selected_account is None
+        assert len(table.columns) == 5
+        assert "balance" not in table.columns
+
+
+async def test_balance_columns_hidden_for_payee_and_amount_sort(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        _select_account(app, "Assets:Checking")
+        await pilot.pause()
+        assert len(table.columns) == 7  # visible under the default date order
+
+        table.on_data_table_header_selected(_header_selected(table, 2))  # payee
+        await pilot.pause()
+        assert len(table.columns) == 5
+        assert "balance" not in table.columns
+
+        table.on_data_table_header_selected(_header_selected(table, 4))  # amount
+        await pilot.pause()
+        assert len(table.columns) == 5
+        assert "balance" not in table.columns
+
+
+async def test_balance_columns_blank_for_recurring_and_non_transaction_rows(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      50000.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        await pilot.press("t")  # also show non-transaction directives
+        _select_account(app, "Assets:Checking")
+        await pilot.pause()
+
+        assert len(table.columns) == 7
+        recurring_row = next(
+            i
+            for i in range(table.row_count)
+            if "↻" in str(table.get_row_at(i)[3])
+        )
+        assert table.get_row_at(recurring_row)[5] == ""
+        assert table.get_row_at(recurring_row)[6] == ""
+
+        # The account's "note" directive (2026-01-16, from
+        # examples/example.beancount) is a non-Transaction row.
+        note_row = next(
+            i
+            for i in range(table.row_count)
+            if "Reconciled against bank statement" in str(table.get_row_at(i)[3])
+        )
+        assert table.get_row_at(note_row)[5] == ""
+        assert table.get_row_at(note_row)[6] == ""
+
+
+async def test_cleared_balance_blank_for_non_cleared_transaction(tmp_path):
+    path = tmp_path / "mixed-flags.beancount"
+    path.write_text(
+        'option "title" "Mixed Flags Ledger"\n'
+        "\n"
+        "2026-01-01 open Assets:Checking\n"
+        "2026-01-01 open Income:Salary\n"
+        "\n"
+        '2026-01-01 * "Opening"\n'
+        "  Assets:Checking    100.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-02 ! "Pending deposit"\n'
+        "  Assets:Checking     50.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-03 * "Cleared deposit"\n'
+        "  Assets:Checking     25.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    app = BeancountTUI(path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        _select_account(app, "Assets:Checking")
+        await pilot.pause()
+
+        assert len(table.columns) == 7
+        balances = [str(table.get_row_at(i)[5]) for i in range(table.row_count)]
+        cleared = [str(table.get_row_at(i)[6]) for i in range(table.row_count)]
+        # Balance is flag-agnostic: all three rows contribute.
+        assert balances == ["100.00 USD", "150.00 USD", "175.00 USD"]
+        # Cleared Balance skips the "!" row entirely (blank cell) and the
+        # next cleared row's total carries forward as if it weren't there.
+        assert cleared == ["100.00 USD", "", "125.00 USD"]
+
+
+async def test_balance_columns_multi_currency_kept_separate(tmp_path):
+    path = tmp_path / "multi-currency.beancount"
+    path.write_text(
+        'option "title" "Multi-currency Ledger"\n'
+        "\n"
+        "2026-01-01 open Assets:Wallet\n"
+        "2026-01-01 open Income:Salary\n"
+        "2026-01-01 open Income:Freelance\n"
+        "\n"
+        '2026-01-02 * "Employer" "USD salary"\n'
+        "  Assets:Wallet    100.00 USD\n"
+        "  Income:Salary\n"
+        "\n"
+        '2026-01-03 * "Client" "EUR invoice"\n'
+        "  Assets:Wallet     50.00 EUR\n"
+        "  Income:Freelance\n"
+        "\n"
+        '2026-01-04 * "Employer" "USD salary"\n'
+        "  Assets:Wallet     20.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    app = BeancountTUI(path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        _select_account(app, "Assets:Wallet")
+        await pilot.pause()
+
+        balances = [str(table.get_row_at(i)[5]) for i in range(table.row_count)]
+        assert balances == [
+            "100.00 USD",
+            "50.00 EUR, 100.00 USD",
+            "50.00 EUR, 120.00 USD",
+        ]
+
+
 async def test_query_runner_screen_runs_typed_query(ledger_path):
     from textual.widgets import DataTable, Input, Static
 
