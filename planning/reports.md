@@ -271,7 +271,7 @@ adding new collapse machinery.
 
 ### RPT-09: Multi-period comparison reports
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** RPT-03
 - **Effort:** 2.5h
 
@@ -288,13 +288,13 @@ Keep the existing single-period call signature/behavior intact — this is
 an additional mode, not a replacement.
 
 **Acceptance criteria:**
-- [ ] A comparison mode accepts 2+ periods and renders a multi-column
+- [x] A comparison mode accepts 2+ periods and renders a multi-column
       table (one column per period) for the income statement.
-- [ ] Existing single-period `income_statement`/screen behavior is
+- [x] Existing single-period `income_statement`/screen behavior is
       unchanged when only one period is requested.
-- [ ] Period columns can be built from `RPT-03`'s preset tokens as well as
+- [x] Period columns can be built from `RPT-03`'s preset tokens as well as
       explicit ranges.
-- [ ] Test covering a known ledger's month-over-month comparison against
+- [x] Test covering a known ledger's month-over-month comparison against
       manually computed per-period totals.
 
 ---
