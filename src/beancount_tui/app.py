@@ -25,6 +25,7 @@ from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
 from beancount_tui.widgets.filter_bar import FilterBar
+from beancount_tui.widgets.forecast_screen import ForecastScreen
 from beancount_tui.widgets.help_screen import HelpScreen
 from beancount_tui.widgets.holdings import HoldingsScreen
 from beancount_tui.widgets.import_form import ImportForm
@@ -174,6 +175,7 @@ class BeancountTUI(App):
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
         ("G", "budget", "Budget vs actual"),
+        ("F", "forecast", "Cash-flow forecast"),
         ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
         ("Q", "query_runner", "Query"),
@@ -287,6 +289,9 @@ class BeancountTUI(App):
 
     def action_budget(self) -> None:
         self.push_screen(BudgetScreen(self.ledger))
+
+    def action_forecast(self) -> None:
+        self.push_screen(ForecastScreen(self.ledger))
 
     def action_holdings(self) -> None:
         self.push_screen(HoldingsScreen(self.ledger))

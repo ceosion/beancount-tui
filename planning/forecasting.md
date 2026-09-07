@@ -199,7 +199,7 @@ figures are never mistaken for actual transactions.
 
 ### FORECAST-07: Discoverability — binding + help screen entry
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-06
 - **Effort:** 0.5h
 
@@ -209,8 +209,8 @@ before picking a key) and add the corresponding entry to the `UX-01` help
 screen.
 
 **Acceptance criteria:**
-- [ ] New binding opens `ForecastScreen` from the main screen.
-- [ ] Help screen lists the new binding alongside the other report
+- [x] New binding opens `ForecastScreen` from the main screen.
+- [x] Help screen lists the new binding alongside the other report
       bindings.
-- [ ] Test covering the binding opens the screen (extending the existing
+- [x] Test covering the binding opens the screen (extending the existing
       `test_app.py` binding-coverage pattern).

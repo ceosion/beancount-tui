@@ -2189,6 +2189,19 @@ async def test_forecast_screen_default_view_projects_forward_without_manual_entr
         assert not isinstance(app.screen, ForecastScreen)
 
 
+async def test_forecast_screen_binding_opens_screen(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("F")
+        await pilot.pause()
+        assert isinstance(app.screen, ForecastScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, ForecastScreen)
+
+
 async def test_trial_balance_screen(ledger_path):
     from textual.widgets import DataTable, Input
 
