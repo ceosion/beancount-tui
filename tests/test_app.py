@@ -1005,7 +1005,7 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
         assert ids == {
             "open", "close", "balance", "pad", "note", "price", "event", "custom", "budget",
-            "query", "document", "commodity",
+            "query", "document", "commodity", "plugin",
         }
 
         await pilot.press("escape")
@@ -1737,6 +1737,31 @@ async def test_add_commodity_directive(ledger_path):
     assert any(
         c.currency == "HOOL" and c.meta.get("name") == "Alphabet Inc" for c in commodities
     )
+
+
+async def test_add_plugin_directive(ledger_path):
+    """LANG-12: the add-directive picker can create a new `plugin` line via
+    the same generic file-picker/template/`append_entry` mechanism every
+    other directive type uses -- despite a `plugin` line parsing to zero
+    `data.Directive` entries (see `Ledger.plugins`), not one."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "plugin")
+
+        form = app.screen
+        assert isinstance(form, DirectiveForm)
+        assert 'plugin "beancount.plugins.auto_accounts"' in form.query_one("#text").text
+
+        form._save()
+        await pilot.pause()
+
+    assert 'plugin "beancount.plugins.auto_accounts"' in ledger_path.read_text()
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert ledger.plugins == [("beancount.plugins.auto_accounts", None)]
 
 
 async def test_commodity_directive_displayed_in_table(ledger_path):
@@ -2609,6 +2634,38 @@ async def test_ledger_info_screen(ledger_path):
         assert str(app.ledger.path.resolve()) in text
         for file in app.ledger.files:
             assert str(file) in text
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, LedgerInfoScreen)
+
+
+async def test_ledger_info_screen_lists_plugins(tmp_path):
+    """LANG-12: declared `plugin` directives are listed in the info screen
+    alongside the existing options."""
+    from textual.widgets import Static
+
+    ledger_file = tmp_path / "ledger.beancount"
+    ledger_file.write_text(
+        'plugin "beancount.plugins.auto_accounts"\n'
+        'option "title" "Plugin Ledger"\n'
+        'option "operating_currency" "USD"\n'
+        "\n"
+        '2026-01-01 * "Employer" "Salary"\n'
+        "  Assets:Checking  10.00 USD\n"
+        "  Income:Salary\n",
+        encoding="utf-8",
+    )
+    app = BeancountTUI(ledger_file)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("L")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, LedgerInfoScreen)
+
+        text = str(screen.query_one("#info", Static).render())
+        assert "beancount.plugins.auto_accounts" in text
 
         await pilot.press("escape")
         await pilot.pause()

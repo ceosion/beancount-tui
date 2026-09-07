@@ -50,6 +50,11 @@ from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
 # Minimal valid source text for each creatable non-transaction directive type,
 # ready for the user to fill in the placeholder account(s)/amount.
+#
+# "plugin" has no `{date}` placeholder, unlike every other entry here: a
+# `plugin "module"` directive is undated in Beancount's own grammar (it's
+# parsed into `options_map["plugin"]`, not a dated `data.*` entry) -- an
+# `{date}` prefix in front of it is a parse error, not just an unused field.
 _DIRECTIVE_TEMPLATES = {
     "open": "{date} open Assets:FIXME",
     "close": "{date} close Assets:FIXME",
@@ -62,6 +67,7 @@ _DIRECTIVE_TEMPLATES = {
     "query": '{date} query "FIXME" "SELECT account, sum(position) GROUP BY account"',
     "document": '{date} document Assets:FIXME "path/to/file.pdf"',
     "commodity": "{date} commodity HOOL",
+    "plugin": 'plugin "beancount.plugins.auto_accounts"',
 }
 
 
@@ -580,9 +586,17 @@ class BeancountTUI(App):
                 )
                 return
             template = _directive_template(keyword, datetime.date.today().isoformat())
+            # A "plugin" line parses to zero `data.Directive` entries (it's
+            # options-only, not an entry -- see `Ledger.plugins`), so its
+            # save-time validation must expect 0 entries, not the default 1
+            # every dated directive type here produces.
+            expected_directives = 0 if keyword == "plugin" else 1
             self.push_screen(
                 DirectiveForm(
-                    template, title=f"New {keyword} directive", files=self.ledger.files
+                    template,
+                    title=f"New {keyword} directive",
+                    files=self.ledger.files,
+                    expected_directives=expected_directives,
                 ),
                 on_form_result,
             )

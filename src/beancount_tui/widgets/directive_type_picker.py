@@ -9,6 +9,16 @@ from textual.widgets import Label, OptionList
 from textual.widgets.option_list import Option
 
 # Keyword, display label. Order shown matches typical usage frequency.
+#
+# "plugin" (LANG-12) only supports *creating* a new plugin line through this
+# picker/`DirectiveForm`'s generic append flow. Editing or deleting an
+# already-existing plugin line is out of scope: `DirectiveForm`'s edit/delete
+# flow locates entries via `.meta['filename']`/`.meta['lineno']` on a
+# `data.Directive`, but a `plugin` line never becomes one -- it's parsed into
+# `options_map["plugin"]`, not `entries` -- so making that work would need
+# new line-locating logic against raw file text instead of reusing the
+# entry-object model every other directive type here shares. A follow-up
+# task, not a silent gap.
 DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("balance", "Balance — assert an account's amount"),
     ("note", "Note — a dated comment on an account"),
@@ -22,6 +32,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("query", "Query — a named BQL query"),
     ("document", "Document — attach a file to an account"),
     ("commodity", "Commodity — declare a currency/commodity symbol"),
+    ("plugin", "Plugin — load a Beancount plugin module"),
 )
 
 
