@@ -14,6 +14,7 @@ from beancount_tui.widgets.account_input import AccountInput
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.budget_form import BudgetForm
+from beancount_tui.widgets.budget_screen import BudgetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
@@ -1689,6 +1690,61 @@ async def test_income_statement_screen(ledger_path):
         await pilot.press("escape")
         await pilot.pause()
         assert not isinstance(app.screen, IncomeStatementScreen)
+
+
+async def test_budget_screen(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    # example.beancount already has an 87.35 USD posting to
+    # Expenses:Food:Groceries on 2026-01-06; a 310.00/month budget (January
+    # has 31 days, so 310.00/31 = 10.00/day, exact over the whole month)
+    # gives a round expected Remaining for a known-budget/known-actual check.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n',
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        # BUDGET-03 doesn't wire a binding (that's BUDGET-06); push directly.
+        app.push_screen(BudgetScreen(app.ledger))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BudgetScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        # Default (no period entered): current month, not all-time — the
+        # January-dated actual posting is out of scope, so Actual is 0
+        # regardless of what the real "today" happens to be. (If this were
+        # an all-time default, Actual would show 87.35 here instead.)
+        assert any("Expenses:Food:Groceries" in c for c in cells(0))
+        assert "0.00 USD" in cells(2)  # Actual
+
+        # Querying the exact January budget period: a known budget (310.00,
+        # exact over the 31-day month) plus the known 87.35 actual posting
+        # produces the expected Remaining.
+        screen.query_one("#period", Input).value = "2026-01-01..2026-01-31"
+        await pilot.pause()
+        assert "Expenses:Food:Groceries" in cells(0)
+        assert "310.00 USD" in cells(1)  # Budgeted
+        assert "87.35 USD" in cells(2)  # Actual
+        assert "222.65 USD" in cells(3)  # Remaining
+
+        # Accounts with postings but no budget directive are excluded.
+        assert not any("Expenses:Rent" in c for c in cells(0))
+
+        # An invalid period shows an error and keeps the last report.
+        screen.query_one("#period", Input).value = "not-a-range"
+        await pilot.pause()
+        assert str(screen.query_one("#period-error", Static).render()) != ""
+        assert "222.65 USD" in cells(3)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BudgetScreen)
 
 
 async def test_trial_balance_screen(ledger_path):

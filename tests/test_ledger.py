@@ -9,6 +9,7 @@ from beancount.core import realization
 from beancount_tui.editor import append_entry
 from beancount_tui.ledger import (
     BudgetEntry,
+    BudgetReportRow,
     Ledger,
     filter_transactions,
     format_inventory,
@@ -785,3 +786,60 @@ def test_budget_target_tracks_currencies_independently(ledger_path):
         "Expenses:Food:Groceries", "EUR", datetime.date(2026, 1, 15), datetime.date(2026, 1, 20)
     )
     assert eur_after_replacement == Decimal("180.00")
+
+
+def test_budget_report_known_budget_and_actual_produces_expected_remaining(ledger_path):
+    # example.beancount already has a 87.35 USD posting to
+    # Expenses:Food:Groceries on 2026-01-06; a 310.00/month budget (January
+    # has 31 days, so 310.00/31 = 10.00/day, exact over the whole month)
+    # gives a round expected Remaining.
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.budget_report(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
+    assert len(rows) == 1
+    row = rows[0]
+    assert isinstance(row, BudgetReportRow)
+    assert row.account == "Expenses:Food:Groceries"
+    assert row.currency == "USD"
+    assert row.budgeted == Decimal("310.00")
+    assert row.actual == Decimal("87.35")
+    assert row.remaining == Decimal("222.65")
+
+
+def test_budget_report_excludes_accounts_with_no_budget(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.budget_report(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
+    accounts = {row.account for row in rows}
+    # Expenses:Rent has postings in this range but no budget directive.
+    assert accounts == {"Expenses:Food:Groceries"}
+
+
+def test_budget_report_excludes_budgets_starting_after_the_range(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-03-01 custom "budget" Expenses:Rent "monthly" 300.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.budget_report(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
+    assert rows == []
+
+
+def test_budget_report_tracks_currencies_as_separate_rows(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 620.00 EUR\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    rows = ledger.budget_report(datetime.date(2026, 1, 1), datetime.date(2026, 1, 31))
+    by_currency = {row.currency: row for row in rows}
+    assert set(by_currency) == {"USD", "EUR"}
+    assert by_currency["USD"].actual == Decimal("87.35")
+    assert by_currency["EUR"].actual == Decimal("0")

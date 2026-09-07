@@ -191,6 +191,31 @@ def _bucket_day_count(interval: str, day: datetime.date) -> int:
 
 
 @dataclass
+class BudgetReportRow:
+    """One row of a budget-vs-actual report (see ``Ledger.budget_report``).
+
+    ``budgeted`` is the day-prorated target for the period
+    (``Ledger.budget_target``). ``actual`` is this exact account's postings
+    in ``currency`` summed over the same period — the same per-account
+    summation idiom ``income_statement``/``balance_sheet`` use, narrowed to
+    one account and one currency, with no sign inversion for Income-side
+    accounts (unlike those reports' display convention): budgets and their
+    actuals are entered/posted with the same sign, so ``remaining =
+    budgeted - actual`` reads directly (positive means under budget for a
+    typical Expense account). There's no sub-account rollup here — a parent
+    account with descendants of its own is a separate row, if it has its own
+    direct budget; summing descendants into a parent row is BUDGET-04, not
+    this.
+    """
+
+    account: str
+    currency: str
+    budgeted: Decimal
+    actual: Decimal
+    remaining: Decimal
+
+
+@dataclass
 class QueryResult:
     """The result of running a BQL query: column names plus row tuples.
 
@@ -385,6 +410,78 @@ class Ledger:
                 total += entry.amount.number / _bucket_day_count(entry.interval, day)
             day += one_day
         return total
+
+    def _account_currency_activity(
+        self,
+        account: str,
+        currency: str,
+        start: datetime.date,
+        end: datetime.date,
+    ) -> Decimal:
+        """Sum of ``account``'s postings in ``currency``, dated in ``[start, end]``.
+
+        The same date-filter-then-sum idiom ``income_statement``/
+        ``balance_sheet`` use for their per-account totals, narrowed to a
+        single exact account (no sub-account rollup — see
+        ``BudgetReportRow``) and a single currency, since a budget target is
+        per-currency (``budget_target``) and the "actual" side needs to
+        match it exactly rather than mixing currencies into an ``Inventory``.
+        """
+        total = Decimal(0)
+        for txn in self.transactions:
+            if txn.date < start or txn.date > end:
+                continue
+            for posting in txn.postings:
+                if posting.account != account:
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                if posting.units.currency != currency:
+                    continue
+                total += posting.units.number
+        return total
+
+    def budget_report(
+        self, start: datetime.date, end: datetime.date
+    ) -> list[BudgetReportRow]:
+        """Budget-vs-actual rows for every account/currency active in ``[start, end]``.
+
+        First derives the universe of ``(account, currency)`` pairs that
+        have a budget at all from ``self.budgets`` (deduped), since
+        ``budget_target`` alone can't tell a "no budget ever" pair apart
+        from a "budget target happens to prorate to zero" one. A pair is
+        then "active" in this period if its time series
+        (``_budget_series``) has an entry on or before ``end`` — i.e. some
+        day within ``[start, end]`` would resolve to an applicable target;
+        a series whose earliest entry postdates ``end`` hasn't taken effect
+        yet within this period and is excluded (a budget entry keeps
+        applying indefinitely once its date arrives, so only the *earliest*
+        entry's date needs checking against ``end``, not every entry's).
+        Accounts with no budget at all never appear (this is the flat
+        per-leaf view described in ``BudgetReportRow``; parent rollup is
+        BUDGET-04). Rows are sorted by account, then currency.
+        """
+        pairs: dict[tuple[str, str], None] = {}
+        for budget in self.budgets:
+            pairs.setdefault((budget.account, budget.amount.currency), None)
+
+        rows: list[BudgetReportRow] = []
+        for account, currency in sorted(pairs):
+            series = self._budget_series(account, currency)
+            if not series or series[0].date > end:
+                continue
+            budgeted = self.budget_target(account, currency, start, end)
+            actual = self._account_currency_activity(account, currency, start, end)
+            rows.append(
+                BudgetReportRow(
+                    account=account,
+                    currency=currency,
+                    budgeted=budgeted,
+                    actual=actual,
+                    remaining=budgeted - actual,
+                )
+            )
+        return rows
 
     @property
     def queries(self) -> list[data.Query]:

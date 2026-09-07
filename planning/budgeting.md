@@ -77,7 +77,7 @@ nothing (clean absence, not a zero-with-a-flag).
 
 ### BUDGET-03: Budget-vs-actual report screen
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** BUDGET-02
 - **Effort:** 2h
 
@@ -92,13 +92,13 @@ Actual). Accounts with no budget defined are excluded from this view (parent
 rollup is `BUDGET-04`).
 
 **Acceptance criteria:**
-- [ ] Report lists every leaf account with an active budget in the selected
+- [x] Report lists every leaf account with an active budget in the selected
       period, with Budgeted/Actual/Remaining columns.
-- [ ] Default (no period entered) view uses a sensible default range (e.g.
+- [x] Default (no period entered) view uses a sensible default range (e.g.
       current month), not all-time.
-- [ ] Bad period input shows an inline error without crashing, matching
+- [x] Bad period input shows an inline error without crashing, matching
       `IncomeStatementScreen`'s existing behavior.
-- [ ] Test covering a known budget + matching actual postings fixture
+- [x] Test covering a known budget + matching actual postings fixture
       producing the expected Remaining value.
 
 ---
