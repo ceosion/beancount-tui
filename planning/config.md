@@ -19,7 +19,7 @@ Textual ships out of the box.
 
 ### CONFIG-01: User config file
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -34,15 +34,34 @@ explicit CLI args override config-file values, which override built-in
 defaults.
 
 **Acceptance criteria:**
-- [ ] A config file at the default location is read if present; a missing
+- [x] A config file at the default location is read if present; a missing
       config file is not an error (falls back to current hardcoded
       defaults).
-- [ ] `watch_interval` is configurable via the file, closing the current
+- [x] `watch_interval` is configurable via the file, closing the current
       gap where it's only reachable from Python.
-- [ ] `default_ledger` allows running with no positional argument.
-- [ ] Explicit CLI args override config-file values.
-- [ ] Test covering: config file present and absent, and a CLI override of
+- [x] `default_ledger` allows running with no positional argument.
+- [x] Explicit CLI args override config-file values.
+- [x] Test covering: config file present and absent, and a CLI override of
       a config-file value.
+
+**Implementation note:** delivered as a new `src/beancount_tui/config.py`
+module — `default_config_path()` (the XDG location, as a function so
+tests can monkeypatch it rather than a value frozen in at import time) and
+`load_config(path=None)`, which returns `{}` for a missing file and calls
+`sys.exit` with a clear message for a *present but malformed* one (not
+just an opaque `TOMLDecodeError` traceback — not explicitly required by
+the acceptance criteria, but a one-line addition given `tomllib` already
+raises a structured error). `app.main()` gained `--config PATH` and
+`--watch-interval SECONDS` flags, and its `ledger` positional became
+optional (`nargs="?"`); precedence is resolved inline in `main()`
+(explicit CLI arg, else `config.get(...)`, else the hardcoded default) and
+`main()` errors via `arg_parser.error(...)` if there's neither a `ledger`
+arg nor a `default_ledger` in the config. Tests (`tests/test_config.py`)
+cover `load_config` directly (present/absent/malformed file) plus
+`app.main()`'s precedence by monkeypatching `app.default_config_path` to a
+`tmp_path` location and substituting a recording stand-in for
+`BeancountTUI` so no test launches a real Textual app or touches the
+user's actual `~/.config/beancount-tui/`.
 
 ---
 
