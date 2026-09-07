@@ -131,7 +131,7 @@ the default.
 
 ### BUDGET-05: Structured budget creation form
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-06, BUDGET-01
 - **Effort:** 2h
 
@@ -148,13 +148,13 @@ alternative to the generic picker specifically for the `budget` custom-type
 case.
 
 **Acceptance criteria:**
-- [ ] Account field tab-completes against known ledger accounts the same
+- [x] Account field tab-completes against known ledger accounts the same
       way the postings editor does.
-- [ ] Interval select only offers the five valid values; amount/currency
+- [x] Interval select only offers the five valid values; amount/currency
       inputs reject non-numeric input before submission.
-- [ ] Assembled text round-trips through the real parser exactly like the
+- [x] Assembled text round-trips through the real parser exactly like the
       existing generic raw-text flow (same validation guarantees).
-- [ ] Test covering filling the structured form and confirming the
+- [x] Test covering filling the structured form and confirming the
       resulting directive parses as a valid `BudgetEntry` (`BUDGET-01`).
 
 ---

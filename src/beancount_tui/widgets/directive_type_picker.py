@@ -18,6 +18,7 @@ DIRECTIVE_TYPES: tuple[tuple[str, str], ...] = (
     ("price", "Price — record a price quote"),
     ("event", "Event — record a dated event value"),
     ("custom", "Custom — a user-defined directive"),
+    ("budget", "Budget — a per-account budget target (guided fields)"),
     ("query", "Query — a named BQL query"),
     ("document", "Document — attach a file to an account"),
     ("commodity", "Commodity — declare a currency/commodity symbol"),
