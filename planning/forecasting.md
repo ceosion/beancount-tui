@@ -33,7 +33,7 @@ defines its own lightweight scheme instead:
 
 ### FORECAST-01: Recurring template data model & parsing
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-08, LANG-09, BUDGET-01
 - **Effort:** 1.5h
 
@@ -47,14 +47,14 @@ rather than duplicating it) and surface an invalid value the same way other
 malformed data does — via the existing error panel, not a crash.
 
 **Acceptance criteria:**
-- [ ] `Ledger.recurring_templates` (or equivalent) returns parsed
+- [x] `Ledger.recurring_templates` (or equivalent) returns parsed
       `RecurringTemplate` objects for every transaction tagged `#recurring`
       with a valid `recurring-freq`.
-- [ ] An invalid `recurring-freq` value surfaces as a validation error
+- [x] An invalid `recurring-freq` value surfaces as a validation error
       rather than being silently dropped or crashing.
-- [ ] `recurring-until` is optional; when absent, the template has no end
+- [x] `recurring-until` is optional; when absent, the template has no end
       date (projects indefinitely, bounded only by the report's own window).
-- [ ] Test covering parsing a handful of `#recurring` transactions across
+- [x] Test covering parsing a handful of `#recurring` transactions across
       intervals, including one with `recurring-until` and one with an
       invalid interval.
 

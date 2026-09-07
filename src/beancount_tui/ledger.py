@@ -232,6 +232,42 @@ class QueryResult:
 
 
 @dataclass
+class RecurringTemplate:
+    """A ``#recurring``-tagged transaction, parsed as a projection template.
+
+    The convention (``FORECAST-01``): an ordinary ``data.Transaction`` is
+    marked as a template by tagging it ``#recurring`` and attaching
+    ``recurring-freq`` (required) and ``recurring-until`` (optional)
+    metadata, e.g.::
+
+        2026-01-01 * "Landlord" "Rent" #recurring
+          recurring-freq: "monthly"
+          recurring-until: "2026-12-31"
+          Expenses:Rent      1450.00 USD
+          Assets:Checking
+
+    Rather than re-deriving the payee/narration/postings shape separately,
+    ``transaction`` keeps a reference to that original entry — it's a real,
+    editable ``data.Transaction`` (see ``Ledger._parse_recurring_templates``)
+    that a later task (``FORECAST-04``) reads postings/payee/narration off
+    of when generating virtual future instances. ``first_date`` is just
+    ``transaction.date`` surfaced under its own name for readability at call
+    sites that only care about the recurrence, not the entry itself.
+    ``interval`` is canonicalized the same way ``BudgetEntry.interval`` is
+    (see ``_BUDGET_INTERVALS``) — one of the five long forms regardless of
+    which spelling ``recurring-freq`` used. ``until`` is ``None`` when
+    ``recurring-until`` is absent, meaning the recurrence has no end date of
+    its own (projects indefinitely, bounded only by whatever date range the
+    caller asks for).
+    """
+
+    first_date: datetime.date
+    interval: str
+    until: datetime.date | None
+    transaction: data.Transaction
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -249,6 +285,9 @@ class Ledger:
     # of equality, since parsing appends to ``errors`` as a side effect and
     # that shouldn't happen more than once per load.
     _budgets: list = field(default_factory=list, repr=False, compare=False)
+    # Parsed eagerly at load/reload time (see ``_parse_recurring_templates``),
+    # same reasoning as ``_budgets``.
+    _recurring_templates: list = field(default_factory=list, repr=False, compare=False)
 
     @classmethod
     def load(cls, path: str | Path) -> "Ledger":
@@ -256,12 +295,14 @@ class Ledger:
         entries, errors, options = loader.load_file(str(path))
         ledger = cls(path=path, entries=entries, errors=errors, options=options)
         ledger._parse_budgets()
+        ledger._parse_recurring_templates()
         return ledger
 
     def reload(self) -> None:
         self.entries, self.errors, self.options = loader.load_file(str(self.path))
         self._price_map = None
         self._parse_budgets()
+        self._parse_recurring_templates()
 
     @property
     def transactions(self) -> list[data.Transaction]:
@@ -349,6 +390,93 @@ class Ledger:
                 BudgetEntry(date=entry.date, account=account, interval=interval, amount=amount)
             )
         self._budgets = budgets
+
+    @property
+    def recurring_templates(self) -> list[RecurringTemplate]:
+        """Parsed ``#recurring``-tagged transactions (see ``RecurringTemplate``).
+
+        Populated at load/reload time by ``_parse_recurring_templates``; a
+        ``#recurring`` transaction with a missing or invalid
+        ``recurring-freq``, or a malformed ``recurring-until``, is excluded
+        here and instead reported via ``self.errors`` — same convention as
+        ``budgets``.
+        """
+        return self._recurring_templates
+
+    def _parse_recurring_templates(self) -> None:
+        """Parse ``#recurring``-tagged transactions into ``self._recurring_templates``.
+
+        Filters ``self.entries`` for ``data.Transaction`` entries tagged
+        ``#recurring`` (``"recurring" in entry.tags``; tags are stored
+        without their ``#`` prefix). Each such transaction is expected to
+        carry ``recurring-freq`` metadata naming one of Fava's five interval
+        values (reusing ``_BUDGET_INTERVALS`` — the same dict and
+        normalization ``_parse_budgets`` uses, rather than a second copy of
+        either) and, optionally, ``recurring-until`` as an ISO
+        ``YYYY-MM-DD`` date string.
+
+        A ``#recurring`` transaction is a template only, not actual
+        activity, but it's still real Beancount data — so a template that
+        fails to parse is reported the same way an invalid budget interval
+        is: a ``loader.LoadError`` appended to ``self.errors`` (never a
+        raised exception), and excluded from ``self.recurring_templates``.
+        This covers three failure shapes, each surfaced with its own
+        message: ``recurring-freq`` missing entirely, ``recurring-freq``
+        present but not one of the five accepted values, and
+        ``recurring-until`` present but not a parseable ISO date. A missing
+        ``recurring-until`` is not a failure — it's the "projects
+        indefinitely" case (see ``RecurringTemplate.until``).
+        """
+        templates: list[RecurringTemplate] = []
+        for entry in self.entries:
+            if not (isinstance(entry, data.Transaction) and "recurring" in (entry.tags or set())):
+                continue
+            raw_interval = entry.meta.get("recurring-freq")
+            if raw_interval is None:
+                self.errors.append(
+                    loader.LoadError(
+                        entry.meta,
+                        "Missing recurring-freq metadata on #recurring transaction",
+                        entry,
+                    )
+                )
+                continue
+            interval = _BUDGET_INTERVALS.get(str(raw_interval).strip().lower())
+            if interval is None:
+                self.errors.append(
+                    loader.LoadError(
+                        entry.meta,
+                        f'Invalid recurring-freq "{raw_interval}": expected one of '
+                        "daily/weekly/monthly/quarterly/yearly "
+                        "(or day/week/month/quarter/year)",
+                        entry,
+                    )
+                )
+                continue
+            raw_until = entry.meta.get("recurring-until")
+            until: datetime.date | None = None
+            if raw_until is not None:
+                try:
+                    until = datetime.date.fromisoformat(str(raw_until).strip())
+                except ValueError:
+                    self.errors.append(
+                        loader.LoadError(
+                            entry.meta,
+                            f'Invalid recurring-until "{raw_until}": expected an '
+                            "ISO date (YYYY-MM-DD)",
+                            entry,
+                        )
+                    )
+                    continue
+            templates.append(
+                RecurringTemplate(
+                    first_date=entry.date,
+                    interval=interval,
+                    until=until,
+                    transaction=entry,
+                )
+            )
+        self._recurring_templates = templates
 
     def _budget_series(self, account: str, currency: str) -> list[BudgetEntry]:
         """This account/currency's budget time series, sorted by date.
