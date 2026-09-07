@@ -163,6 +163,31 @@ _BUDGET_INTERVALS = {
 }
 
 
+def _plugin_name_from_traceback(exc: BaseException) -> str | None:
+    """Best-effort: which plugin module was running when ``exc`` escaped
+    ``beancount.loader.run_transformations`` (see ``Ledger._load_file``).
+
+    ``run_transformations`` binds the currently-invoked plugin's dotted
+    module name to a local variable named ``plugin_name`` in its
+    ``for plugin_name, plugin_config in plugins_iter:`` loop, for the
+    duration of that plugin's callback. A ``SystemExit`` raised from inside
+    the callback still has that frame (and its locals) live on
+    ``exc.__traceback__`` at the moment it's caught in ``_load_file`` --
+    walking the traceback chain to find it lets the resulting load error
+    name *which* plugin misbehaved instead of reporting an anonymous
+    failure. Returns ``None`` if that frame/variable isn't found (a future
+    beancount version renamed it, or ``exc`` came from somewhere else
+    entirely), so callers always have a safe generic fallback message.
+    """
+    tb = exc.__traceback__
+    while tb is not None:
+        frame = tb.tb_frame
+        if frame.f_code.co_name == "run_transformations" and "plugin_name" in frame.f_locals:
+            return frame.f_locals["plugin_name"]
+        tb = tb.tb_next
+    return None
+
+
 def _bucket_day_count(interval: str, day: datetime.date) -> int:
     """Number of days in the calendar bucket of ``interval`` containing ``day``.
 
@@ -437,17 +462,57 @@ class Ledger:
     @classmethod
     def load(cls, path: str | Path) -> "Ledger":
         path = Path(path)
-        entries, errors, options = loader.load_file(str(path))
+        entries, errors, options = cls._load_file(path)
         ledger = cls(path=path, entries=entries, errors=errors, options=options)
         ledger._parse_budgets()
         ledger._parse_recurring_templates()
         return ledger
 
     def reload(self) -> None:
-        self.entries, self.errors, self.options = loader.load_file(str(self.path))
+        self.entries, self.errors, self.options = self._load_file(self.path)
         self._price_map = None
         self._parse_budgets()
         self._parse_recurring_templates()
+
+    @staticmethod
+    def _load_file(path: Path) -> tuple[list, list, dict]:
+        """``loader.load_file``, with a misbehaving plugin's ``sys.exit()``
+        turned into a normal load error instead of crashing the app (``LANG-13``).
+
+        ``beancount.loader.run_transformations`` deliberately re-raises
+        ``SystemExit`` out of a plugin's callback uncaught (see its "Allow
+        the user to exit in a plugin" comment) rather than converting it
+        into a ``LoadError`` the way it does for every other exception a
+        plugin might raise. That's a reasonable default for a one-shot
+        script invoking the loader directly, but fatal for a long-running
+        TUI: an ordinary plugin bug already degrades gracefully into the
+        ``#errors`` panel (``app.refresh_views``), and a plugin calling
+        ``sys.exit()`` should too, not take the whole app down with it.
+        Note ``SystemExit`` subclasses ``BaseException``, not ``Exception``
+        -- it has to be caught explicitly here; a bare ``except Exception``
+        would let it through. The catch is scoped tightly around this one
+        ``loader.load_file`` call so it can't accidentally swallow an
+        unrelated, intentional process exit raised elsewhere in the call
+        stack.
+
+        On this path, ``entries``/``options`` come back empty (the load
+        didn't meaningfully complete) and ``errors`` holds a single
+        ``loader.LoadError`` naming the offending plugin (best-effort, via
+        ``_plugin_name_from_traceback``) and the exit's own message/code.
+        """
+        try:
+            return loader.load_file(str(path))
+        except SystemExit as exc:
+            plugin_name = _plugin_name_from_traceback(exc)
+            detail = str(exc)
+            if plugin_name:
+                message = f'Plugin "{plugin_name}" called sys.exit() during load'
+            else:
+                message = "A plugin called sys.exit() during load"
+            if detail:
+                message += f": {detail}"
+            error = loader.LoadError(data.new_metadata(str(path), 0), message, None)
+            return [], [error], {}
 
     @property
     def transactions(self) -> list[data.Transaction]:
@@ -1355,6 +1420,46 @@ class Ledger:
             if any(p.account == account or p.account.startswith(prefix) for p in txn.postings)
         ]
 
+    def _register_walk(
+        self, account: str, only_cleared: bool = False
+    ) -> list[tuple[data.Transaction, Inventory, Inventory]]:
+        """Shared chronological walk behind ``register``/``running_balances`` (RPT-07).
+
+        Every transaction posting to ``account`` or any of its sub-accounts
+        (excluding ``#recurring`` templates, per ``_actual_transactions``),
+        in date order, paired with that transaction's summed posting
+        amount to the account and the cumulative running balance
+        immediately after. Multiple currencies coexist in each
+        ``Inventory`` without mixing.
+
+        ``only_cleared=True`` restricts the walk to ``flag == "*"``
+        (cleared) transactions: a non-cleared transaction is skipped
+        entirely -- it contributes nothing to the running total and never
+        appears in the result -- which is exactly the "Cleared Balance"
+        figure (only cleared activity counts, independent of any
+        still-pending ``!`` activity also in the ledger).
+        """
+        prefix = account + ":"
+        txns = sorted(
+            self.transactions_for_account(account, self._actual_transactions),
+            key=lambda txn: txn.date,
+        )
+        running = Inventory()
+        rows: list[tuple[data.Transaction, Inventory, Inventory]] = []
+        for txn in txns:
+            if only_cleared and txn.flag != "*":
+                continue
+            posting_amount = Inventory()
+            for posting in txn.postings:
+                if posting.account != account and not posting.account.startswith(prefix):
+                    continue
+                if posting.units is None or posting.units.number is None:
+                    continue
+                posting_amount.add_amount(posting.units)
+            running.add_inventory(posting_amount)
+            rows.append((txn, posting_amount, Inventory(running)))
+        return rows
+
     def register(self, account: str) -> list[RegisterRow]:
         """Per-transaction posting amount and running balance for ``account``.
 
@@ -1364,33 +1469,52 @@ class Ledger:
         amount and the running balance immediately after. Multiple
         currencies coexist in each ``Inventory`` without mixing.
         ``#recurring`` template transactions are excluded, like every other
-        actual-data report (see ``_actual_transactions``).
+        actual-data report (see ``_actual_transactions``). See
+        ``_register_walk`` for the shared implementation (also used by
+        ``running_balances``, RPT-07's inline main-table columns).
         """
-        prefix = account + ":"
-        txns = sorted(
-            self.transactions_for_account(account, self._actual_transactions),
-            key=lambda txn: txn.date,
-        )
-        running = Inventory()
-        rows: list[RegisterRow] = []
-        for txn in txns:
-            posting_amount = Inventory()
-            for posting in txn.postings:
-                if posting.account != account and not posting.account.startswith(prefix):
-                    continue
-                if posting.units is None or posting.units.number is None:
-                    continue
-                posting_amount.add_amount(posting.units)
-            running.add_inventory(posting_amount)
-            rows.append(
-                RegisterRow(
-                    date=txn.date,
-                    narration=txn.narration,
-                    posting_amount=posting_amount,
-                    running_balance=Inventory(running),
-                )
+        return [
+            RegisterRow(
+                date=txn.date,
+                narration=txn.narration,
+                posting_amount=posting_amount,
+                running_balance=running_balance,
             )
-        return rows
+            for txn, posting_amount, running_balance in self._register_walk(account)
+        ]
+
+    def running_balances(
+        self, account: str, only_cleared: bool = False
+    ) -> dict[int, Inventory]:
+        """``account``'s running balance after each contributing transaction (RPT-07).
+
+        Same chronological, sub-account-inclusive, ``#recurring``-exclusive
+        walk as ``register`` (see ``_register_walk``), re-keyed for direct
+        lookup by transaction instead of a plain list -- what
+        ``TransactionTable``'s inline Balance/Cleared Balance columns need,
+        since they render rows in whatever order the table is currently
+        sorted in rather than chronological order, but the balances
+        themselves must always reflect the earliest-to-latest walk.
+
+        Keyed by ``id(transaction)`` rather than the transaction itself:
+        ``data.Transaction`` carries a ``meta`` dict, which makes the whole
+        namedtuple unhashable, so it can't be a real dict key. ``id()`` is
+        the practical stand-in for "this exact transaction object" --
+        correct as long as the caller matches keys against transactions
+        drawn from this same ``Ledger`` snapshot (e.g. the same
+        ``self.entries`` a table's rows came from), not across a
+        ``reload()``, which produces entirely new entry objects.
+
+        ``only_cleared=True`` returns the Cleared Balance variant: only
+        ``flag == "*"`` transactions contribute to the running total, and a
+        non-cleared transaction is simply absent from the result -- a
+        lookup miss is the correct "doesn't contribute" signal for a
+        caller, rather than a stale or zero entry.
+        """
+        return {
+            id(txn): running_balance
+            for txn, _, running_balance in self._register_walk(account, only_cleared=only_cleared)
+        }
 
     def root_account(self) -> realization.RealAccount:
         """The realized account tree, with balances, for the account sidebar.

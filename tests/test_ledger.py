@@ -24,11 +24,59 @@ from beancount_tui.ledger import (
 )
 
 
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
 def test_load_example(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert not ledger.errors
     assert len(ledger.transactions) == 6
     assert "Expenses:Food:Groceries" in ledger.accounts
+
+
+def test_load_plugin_system_exit_surfaces_as_error_not_crash(tmp_path, monkeypatch):
+    """LANG-13: a plugin calling sys.exit() during load must not crash the
+    app -- it should degrade into a normal, #errors-panel-renderable load
+    error that names the offending plugin, the same as an ordinary plugin
+    exception already does."""
+    monkeypatch.syspath_prepend(str(FIXTURES))
+    ledger_file = tmp_path / "ledger.beancount"
+    ledger_file.write_text(
+        'plugin "plugin_raises_system_exit"\n'
+        'option "operating_currency" "USD"\n'
+        "\n"
+        "2026-01-01 open Assets:Checking USD\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(ledger_file)
+    assert len(ledger.errors) == 1
+    assert "plugin_raises_system_exit" in ledger.errors[0].message
+    assert "simulated fatal plugin failure" in ledger.errors[0].message
+    # The load bailed out cleanly rather than crashing mid-way.
+    assert ledger.entries == []
+
+
+def test_reload_plugin_system_exit_surfaces_as_error_not_crash(tmp_path, monkeypatch):
+    """Same as above, but via reload() on an already-loaded ledger, since
+    LANG-13 covers both entry points."""
+    monkeypatch.syspath_prepend(str(FIXTURES))
+    ledger_file = tmp_path / "ledger.beancount"
+    ledger_file.write_text(
+        'option "operating_currency" "USD"\n\n2026-01-01 open Assets:Checking USD\n',
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(ledger_file)
+    assert not ledger.errors
+
+    ledger_file.write_text(
+        'plugin "plugin_raises_system_exit"\n'
+        'option "operating_currency" "USD"\n\n'
+        "2026-01-01 open Assets:Checking USD\n",
+        encoding="utf-8",
+    )
+    ledger.reload()
+    assert len(ledger.errors) == 1
+    assert "plugin_raises_system_exit" in ledger.errors[0].message
 
 
 def test_transactions_for_account_includes_subaccounts(ledger_path):

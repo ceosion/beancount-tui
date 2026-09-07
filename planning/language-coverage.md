@@ -301,7 +301,7 @@ every other directive type shares.
 
 ### LANG-13: Harden plugin-load failure handling
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -318,10 +318,10 @@ Catch `SystemExit` around the `loader.load_file` call in `Ledger.load`/
 gracefully instead of taking down the TUI.
 
 **Acceptance criteria:**
-- [ ] A plugin calling `sys.exit(...)` during load no longer crashes the
+- [x] A plugin calling `sys.exit(...)` during load no longer crashes the
       app.
-- [ ] The failure surfaces in the existing `#errors` panel with a readable
+- [x] The failure surfaces in the existing `#errors` panel with a readable
       message identifying the plugin.
-- [ ] Normal (non-plugin-related) load errors are unaffected.
-- [ ] Test covering load against a fixture ledger declaring a plugin that
+- [x] Normal (non-plugin-related) load errors are unaffected.
+- [x] Test covering load against a fixture ledger declaring a plugin that
       raises `SystemExit`.
