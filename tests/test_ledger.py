@@ -608,3 +608,180 @@ def test_budgets_invalid_interval_does_not_block_valid_ones(ledger_path):
     assert ledger.budgets[0].interval == "monthly"
     assert len(ledger.errors) == 1
     assert "fortnightly" in ledger.errors[0].message
+
+
+def test_budget_target_no_matching_budget_is_zero(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    assert ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 31)
+    ) == Decimal(0)
+
+
+def test_budget_target_days_before_earliest_entry_contribute_nothing(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 custom "budget" Expenses:Rent "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # Only Feb 1 is on/after the entry's date; Jan 30-31 predate it and
+    # contribute nothing (clean absence, not a zero-with-a-flag per day).
+    assert ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2026, 1, 30), datetime.date(2026, 2, 1)
+    ) == Decimal("10.00")
+
+
+def test_budget_target_daily(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Assets:Checking "daily" 10.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # 5 days (Jan 1-5 inclusive) at a flat 10.00/day.
+    total = ledger.budget_target(
+        "Assets:Checking", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 5)
+    )
+    assert total == Decimal("50.00")
+
+
+def test_budget_target_weekly(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Assets:Savings "weekly" 70.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # 70.00/week = 10.00/day (flat 7-day bucket), over 10 days.
+    total = ledger.budget_target(
+        "Assets:Savings", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)
+    )
+    assert total == Decimal("100.00")
+
+
+def test_budget_target_monthly(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-04-01 custom "budget" Expenses:Rent "monthly" 300.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # April has 30 days, so 300.00/30 = 10.00/day, over the first 10 days.
+    total = ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2026, 4, 1), datetime.date(2026, 4, 10)
+    )
+    assert total == Decimal("100.00")
+
+
+def test_budget_target_quarterly(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-04-01 custom "budget" Expenses:Food:Groceries "quarterly" 910.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # Q2 2026 (Apr/May/Jun) is 30+31+30 = 91 days, so 910.00/91 = 10.00/day,
+    # over the first 10 days.
+    total = ledger.budget_target(
+        "Expenses:Food:Groceries", "USD", datetime.date(2026, 4, 1), datetime.date(2026, 4, 10)
+    )
+    assert total == Decimal("100.00")
+
+
+def test_budget_target_yearly(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Restaurant "yearly" 3650.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # 2026 is not a leap year (365 days), so 3650.00/365 = 10.00/day, over
+    # the first 10 days.
+    total = ledger.budget_target(
+        "Expenses:Food:Restaurant", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)
+    )
+    assert total == Decimal("100.00")
+
+
+def test_budget_target_leap_year_february(ledger_path):
+    append_entry(
+        ledger_path,
+        '2024-02-01 custom "budget" Expenses:Rent "monthly" 290.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # 2024 is a leap year, so February has 29 (not 28) days: 290.00/29 =
+    # 10.00/day, over the entire month.
+    total = ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2024, 2, 1), datetime.date(2024, 2, 29)
+    )
+    assert total == Decimal("290.00")
+
+
+def test_budget_target_quarter_boundary_uses_each_days_own_bucket(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "quarterly" 8190.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # A single quarterly entry spanning the Q1/Q2 boundary: Q1 2026
+    # (Jan/Feb/Mar) is 31+28+31 = 90 days (8190.00/90 = 91.00/day); Q2 2026
+    # (Apr/May/Jun) is 30+31+30 = 91 days (8190.00/91 = 90.00/day). Each
+    # day's own calendar-quarter bucket is used, not a flat average across
+    # the range: Mar 30-31 (2 days at 91.00) + Apr 1-2 (2 days at 90.00).
+    total = ledger.budget_target(
+        "Expenses:Food:Groceries", "USD", datetime.date(2026, 3, 30), datetime.date(2026, 4, 2)
+    )
+    assert total == Decimal("362.00")
+
+
+def test_budget_target_later_entry_supersedes_from_its_own_date(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Rent "monthly" 310.00 USD\n'
+        '2026-01-20 custom "budget" Expenses:Rent "monthly" 620.00 USD\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    # January has 31 days: the first entry is 310.00/31 = 10.00/day, the
+    # second (superseding from Jan 20 onward) is 620.00/31 = 20.00/day.
+    # Jan 15-19 (5 days, pre-replacement) + Jan 20-25 (6 days, replaced).
+    total = ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2026, 1, 15), datetime.date(2026, 1, 25)
+    )
+    assert total == Decimal("170.00")
+
+    # The earlier entry still applies to days before the replacement date.
+    only_before = ledger.budget_target(
+        "Expenses:Rent", "USD", datetime.date(2026, 1, 15), datetime.date(2026, 1, 19)
+    )
+    assert only_before == Decimal("50.00")
+
+
+def test_budget_target_tracks_currencies_independently(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 620.00 EUR\n',
+    )
+    ledger = Ledger.load(ledger_path)
+    usd_before = ledger.budget_target(
+        "Expenses:Food:Groceries", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 5)
+    )
+    assert usd_before == Decimal("50.00")
+
+    # Add a second, later EUR entry that supersedes the first EUR one.
+    append_entry(
+        ledger_path,
+        '2026-01-15 custom "budget" Expenses:Food:Groceries "monthly" 930.00 EUR\n',
+    )
+    ledger = Ledger.load(ledger_path)
+
+    # The USD series is untouched by the EUR replacement.
+    usd_after = ledger.budget_target(
+        "Expenses:Food:Groceries", "USD", datetime.date(2026, 1, 1), datetime.date(2026, 1, 5)
+    )
+    assert usd_after == usd_before == Decimal("50.00")
+
+    # EUR itself resolved its own most-recent entry per day: 620.00/31 =
+    # 20.00/day before Jan 15, then 930.00/31 = 30.00/day from Jan 15 on.
+    eur_before_replacement = ledger.budget_target(
+        "Expenses:Food:Groceries", "EUR", datetime.date(2026, 1, 1), datetime.date(2026, 1, 10)
+    )
+    assert eur_before_replacement == Decimal("200.00")
+    eur_after_replacement = ledger.budget_target(
+        "Expenses:Food:Groceries", "EUR", datetime.date(2026, 1, 15), datetime.date(2026, 1, 20)
+    )
+    assert eur_after_replacement == Decimal("180.00")

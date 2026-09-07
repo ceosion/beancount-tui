@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import bisect
+import calendar
 import datetime
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -161,6 +163,33 @@ _BUDGET_INTERVALS = {
 }
 
 
+def _bucket_day_count(interval: str, day: datetime.date) -> int:
+    """Number of days in the calendar bucket of ``interval`` containing ``day``.
+
+    ``daily``/``weekly`` are a flat 1/7. ``monthly``/``quarterly``/``yearly``
+    are computed from the real calendar rather than averaged (e.g. a
+    365.25-day year or a 30-day month): a February bucket is 28 or 29 days
+    depending on ``day.year``, a quarterly bucket sums the real lengths of
+    its three months, and a yearly bucket is 366 in a leap year, 365
+    otherwise. This is Fava's proration model — see ``Ledger.budget_target``.
+    """
+    if interval == "daily":
+        return 1
+    if interval == "weekly":
+        return 7
+    if interval == "monthly":
+        return calendar.monthrange(day.year, day.month)[1]
+    if interval == "quarterly":
+        quarter_start_month = 3 * ((day.month - 1) // 3) + 1
+        return sum(
+            calendar.monthrange(day.year, month)[1]
+            for month in range(quarter_start_month, quarter_start_month + 3)
+        )
+    if interval == "yearly":
+        return 366 if calendar.isleap(day.year) else 365
+    raise ValueError(f"unknown budget interval: {interval!r}")
+
+
 @dataclass
 class QueryResult:
     """The result of running a BQL query: column names plus row tuples.
@@ -295,6 +324,67 @@ class Ledger:
                 BudgetEntry(date=entry.date, account=account, interval=interval, amount=amount)
             )
         self._budgets = budgets
+
+    def _budget_series(self, account: str, currency: str) -> list[BudgetEntry]:
+        """This account/currency's budget time series, sorted by date.
+
+        Budget entries for other accounts or other currencies of the same
+        account are a different series entirely (see ``budget_target``'s
+        "latest wins, tracked independently per currency" model) and are
+        excluded here.
+        """
+        return sorted(
+            (b for b in self.budgets if b.account == account and b.amount.currency == currency),
+            key=lambda b: b.date,
+        )
+
+    def budget_target(
+        self,
+        account: str,
+        currency: str,
+        start: datetime.date,
+        end: datetime.date,
+    ) -> Decimal:
+        """Fava's day-by-day prorated budget target for ``account``/``currency``.
+
+        Walks every day in ``[start, end]`` (inclusive on both ends) and
+        adds that day's share of the applicable budget: the most recent
+        ``BudgetEntry`` for this exact ``account``/``currency`` pair whose
+        ``date`` is on or before the day (per-currency time series — see
+        ``_budget_series``; a EUR and a USD budget for the same account each
+        have their own independent "most recent" pointer, and a later entry
+        supersedes an earlier one only from its own date onward, so days
+        before it still resolve to whatever was current then). A day's
+        share is ``entry.amount / _bucket_day_count(entry.interval, day)`` —
+        the exact number of days in the real calendar month/quarter/year (or
+        flat 7/1 for weekly/daily) containing that specific day, not a flat
+        average, so proration is exact across month/quarter/leap-year
+        boundaries even for a single unchanging entry.
+
+        A day with no applicable entry (before this series' earliest date,
+        or no entry exists at all for this account/currency) contributes
+        nothing — a clean absence rather than a zero-with-a-flag — so an
+        account/currency with no budget anywhere in the range returns a
+        plain ``Decimal(0)``, indistinguishable from a budget of zero; the
+        caller (BUDGET-03's report) is expected to already know which
+        account/currency pairs have a budget at all via ``self.budgets``
+        before calling this.
+        """
+        series = self._budget_series(account, currency)
+        if not series:
+            return Decimal(0)
+        dates = [entry.date for entry in series]
+
+        total = Decimal(0)
+        one_day = datetime.timedelta(days=1)
+        day = start
+        while day <= end:
+            idx = bisect.bisect_right(dates, day) - 1
+            if idx >= 0:
+                entry = series[idx]
+                total += entry.amount.number / _bucket_day_count(entry.interval, day)
+            day += one_day
+        return total
 
     @property
     def queries(self) -> list[data.Query]:

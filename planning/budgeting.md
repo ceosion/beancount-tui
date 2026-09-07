@@ -44,7 +44,7 @@ than crashing. This is pure parsing — no proration math yet.
 
 ### BUDGET-02: Budget target calculation (day-prorated, time-series)
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** BUDGET-01
 - **Effort:** 2h
 
@@ -61,16 +61,16 @@ An account with no matching budget for a given day/currency contributes
 nothing (clean absence, not a zero-with-a-flag).
 
 **Acceptance criteria:**
-- [ ] Prorated target over an arbitrary date range matches hand-computed
+- [x] Prorated target over an arbitrary date range matches hand-computed
       expected values for daily, weekly, monthly, quarterly, and yearly
       budgets, including a range spanning a leap-year February and a
       calendar-quarter boundary.
-- [ ] A later budget entry for the same account/currency supersedes the
+- [x] A later budget entry for the same account/currency supersedes the
       earlier one from its start date onward; the earlier entry still
       applies to days before that.
-- [ ] Two budget entries for the same account in different currencies are
+- [x] Two budget entries for the same account in different currencies are
       tracked independently (replacing one doesn't affect the other).
-- [ ] Test covering the time-series replacement and the leap-year/quarter
+- [x] Test covering the time-series replacement and the leap-year/quarter
       proration edge cases explicitly.
 
 ---
