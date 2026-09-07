@@ -204,8 +204,8 @@ class BudgetReportRow:
     budgeted - actual`` reads directly (positive means under budget for a
     typical Expense account). There's no sub-account rollup here — a parent
     account with descendants of its own is a separate row, if it has its own
-    direct budget; summing descendants into a parent row is BUDGET-04, not
-    this.
+    direct budget; see ``Ledger.budget_report_rolled_up`` for the opt-in
+    view that sums descendants into a parent row instead.
     """
 
     account: str
@@ -458,8 +458,9 @@ class Ledger:
         applying indefinitely once its date arrives, so only the *earliest*
         entry's date needs checking against ``end``, not every entry's).
         Accounts with no budget at all never appear (this is the flat
-        per-leaf view described in ``BudgetReportRow``; parent rollup is
-        BUDGET-04). Rows are sorted by account, then currency.
+        per-leaf view described in ``BudgetReportRow``; see
+        ``budget_report_rolled_up`` for the opt-in parent rollup). Rows are
+        sorted by account, then currency.
         """
         pairs: dict[tuple[str, str], None] = {}
         for budget in self.budgets:
@@ -482,6 +483,68 @@ class Ledger:
                 )
             )
         return rows
+
+    def budget_report_rolled_up(
+        self, start: datetime.date, end: datetime.date
+    ) -> list[BudgetReportRow]:
+        """``budget_report``, plus synthesized parent-account rollup rows.
+
+        Opt-in (BUDGET-04), mirroring Fava's ``calculate_budget_children``:
+        starts from the flat ``budget_report`` rows — one per leaf
+        ``(account, currency)`` pair with an active budget — then, per
+        currency, considers every proper ancestor of a budgeted account
+        (e.g. ``Expenses:Food`` and ``Expenses`` for
+        ``Expenses:Food:Groceries``, split on ``:``). An ancestor that has
+        no flat row of its own gets a synthesized row summing the
+        Budgeted/Actual/Remaining of every flat row whose account is one of
+        its descendants (string-prefix match on ``ancestor + ":"``) — not
+        just its immediate children, so a grandparent's synthesized row
+        totals every budgeted leaf beneath it directly, rather than
+        compounding through an intermediate synthesized row.
+
+        An ancestor that already has its own flat row (its own direct
+        budget entry) is left alone — no synthesized row is added for it,
+        so its own figures aren't double-counted against a sum of its
+        children's. That account's descendants, if any of them are
+        separately budgeted, still contribute to *their own* ancestors
+        further up the tree.
+
+        The result is the flat rows plus these synthesized rows, sorted by
+        account then currency, same as ``budget_report``.
+        """
+        flat_rows = self.budget_report(start, end)
+        by_currency: dict[str, list[BudgetReportRow]] = {}
+        for row in flat_rows:
+            by_currency.setdefault(row.currency, []).append(row)
+
+        synthesized: list[BudgetReportRow] = []
+        for currency, rows in by_currency.items():
+            direct_accounts = {row.account for row in rows}
+            ancestors: set[str] = set()
+            for row in rows:
+                parts = row.account.split(":")
+                for i in range(1, len(parts)):
+                    ancestors.add(":".join(parts[:i]))
+            for ancestor in ancestors:
+                if ancestor in direct_accounts:
+                    continue
+                prefix = ancestor + ":"
+                descendants = [row for row in rows if row.account.startswith(prefix)]
+                if not descendants:
+                    continue
+                budgeted = sum((row.budgeted for row in descendants), Decimal(0))
+                actual = sum((row.actual for row in descendants), Decimal(0))
+                synthesized.append(
+                    BudgetReportRow(
+                        account=ancestor,
+                        currency=currency,
+                        budgeted=budgeted,
+                        actual=actual,
+                        remaining=budgeted - actual,
+                    )
+                )
+
+        return sorted(flat_rows + synthesized, key=lambda row: (row.account, row.currency))
 
     @property
     def queries(self) -> list[data.Query]:

@@ -105,7 +105,7 @@ rollup is `BUDGET-04`).
 
 ### BUDGET-04: Parent/child budget rollup
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** BUDGET-03
 - **Effort:** 1h
 
@@ -119,12 +119,12 @@ rolled-up), off by default so the flat per-leaf view from `BUDGET-03` stays
 the default.
 
 **Acceptance criteria:**
-- [ ] Toggling rollup on shows parent-account rows summing their budgeted
+- [x] Toggling rollup on shows parent-account rows summing their budgeted
       descendants' figures.
-- [ ] A parent account with its own direct budget entry is not
+- [x] A parent account with its own direct budget entry is not
       double-counted against its children's rolled-up total.
-- [ ] Toggling rollup off returns to the flat `BUDGET-03` view.
-- [ ] Test covering a 3-level account hierarchy with budgets on two
+- [x] Toggling rollup off returns to the flat `BUDGET-03` view.
+- [x] Test covering a 3-level account hierarchy with budgets on two
       siblings, rolled up into their shared parent.
 
 ---

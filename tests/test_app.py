@@ -1747,6 +1747,65 @@ async def test_budget_screen(ledger_path):
         assert not isinstance(app.screen, BudgetScreen)
 
 
+async def test_budget_screen_rollup_toggle(ledger_path):
+    from textual.widgets import DataTable, Input
+
+    # Same 3-level hierarchy as test_ledger.py's rollup tests:
+    # Expenses:Food:Groceries (87.35 actual) and Expenses:Food:Restaurant
+    # (64.20 actual) are sibling leaves under Expenses:Food, which has no
+    # budget of its own (BUDGET-04's acceptance-criteria fixture).
+    append_entry(
+        ledger_path,
+        '2026-01-01 custom "budget" Expenses:Food:Groceries "monthly" 310.00 USD\n'
+        '2026-01-01 custom "budget" Expenses:Food:Restaurant "monthly" 155.00 USD\n',
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.push_screen(BudgetScreen(app.ledger))
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, BudgetScreen)
+
+        def cells(column):
+            table = screen.query_one("#report", DataTable)
+            return [str(table.get_row_at(i)[column]) for i in range(table.row_count)]
+
+        screen.query_one("#period", Input).value = "2026-01-01..2026-01-31"
+        await pilot.pause()
+
+        # Off by default (BUDGET-03's flat view): no synthesized
+        # Expenses:Food row.
+        assert not any(c == "Expenses:Food" for c in cells(0))
+        assert any("Expenses:Food:Groceries" in c for c in cells(0))
+        assert any("Expenses:Food:Restaurant" in c for c in cells(0))
+
+        # Move focus off the period Input so "r" hits the screen binding
+        # rather than being typed into the field.
+        screen.query_one("#report", DataTable).focus()
+        await pilot.pause()
+
+        # Toggling rollup on adds the synthesized parent row summing both
+        # siblings' figures, alongside the still-present leaf rows.
+        await pilot.press("r")
+        await pilot.pause()
+        assert any(c == "Expenses:Food" for c in cells(0))
+        assert any("Expenses:Food:Groceries" in c for c in cells(0))
+        assert "465.00 USD" in cells(1)  # Budgeted (310.00 + 155.00)
+        assert "151.55 USD" in cells(2)  # Actual (87.35 + 64.20)
+        assert "313.45 USD" in cells(3)  # Remaining
+
+        # Toggling rollup off again returns to the flat BUDGET-03 view.
+        await pilot.press("r")
+        await pilot.pause()
+        assert not any(c == "Expenses:Food" for c in cells(0))
+        assert any("Expenses:Food:Groceries" in c for c in cells(0))
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BudgetScreen)
+
+
 async def test_trial_balance_screen(ledger_path):
     from textual.widgets import DataTable, Input
 
