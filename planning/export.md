@@ -19,7 +19,7 @@ today.
 
 ### EXPORT-01: Export infrastructure + CSV/JSON export for the query runner
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** RPT-06
 - **Effort:** 2h
 
@@ -40,16 +40,37 @@ exists, and warn rather than silently overwrite if the target path already
 exists.
 
 **Acceptance criteria:**
-- [ ] Query runner has an export action producing a valid CSV file
+- [x] Query runner has an export action producing a valid CSV file
       matching the on-screen columns/rows.
-- [ ] The same action (or a format toggle) can also produce a valid JSON
+- [x] The same action (or a format toggle) can also produce a valid JSON
       file (array of row objects keyed by column name).
-- [ ] Invalid export paths (non-existent parent directory) show an inline
+- [x] Invalid export paths (non-existent parent directory) show an inline
       error rather than crashing.
-- [ ] An existing target path prompts for confirmation rather than
+- [x] An existing target path prompts for confirmation rather than
       silently overwriting.
-- [ ] Test covering CSV and JSON output content against a known query
+- [x] Test covering CSV and JSON output content against a known query
       result.
+
+**Implementation notes:** Landed as `src/beancount_tui/export.py`
+(`write_csv`/`write_json`, working from `QueryResult.columns`/`.rows`) plus
+an export row (`Input` + CSV/JSON `Select` toggle + `Export` button) added
+to `QueryRunnerScreen`, wired to the last-run query's raw result (not the
+`format_query_value`-rendered `DataTable` contents). Overwrite confirmation
+reuses the existing app-wide `ConfirmDialog` widget (the same one used for
+e.g. deleting a transaction) rather than a bespoke yes/no prompt, since
+that's the established pattern for "are you sure" moments in this
+codebase and the task's inline-error `Static` pattern is reserved for
+validation problems, not confirmations. JSON rendering of Beancount value
+types goes a bit further than the task's specific `Decimal`-as-string
+callout: `Amount`/`Position` become `{"number": "<str>", "currency": ...}`
+objects and `Inventory` becomes a list of such objects (one per currency
+lot), rather than falling back to a flattened string — this seemed like
+the natural extension of "stay closer to real types" once `Decimal` was
+being special-cased anyway. Covered by `tests/test_export.py` (helper
+unit tests, including a real-ledger query) and four new
+`tests/test_app.py::test_query_runner_export_*` tests exercising the full
+widget flow (CSV, JSON, missing-parent-dir error, overwrite confirmation
+cancel/confirm).
 
 ---
 
