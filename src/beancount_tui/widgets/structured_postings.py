@@ -106,6 +106,9 @@ class StructuredPostingsArea(Vertical):
     StructuredPostingsArea {
         height: auto;
     }
+    StructuredPostingsArea #rows {
+        height: auto;
+    }
     StructuredPostingsArea #add-posting-row {
         margin-top: 1;
         width: auto;
