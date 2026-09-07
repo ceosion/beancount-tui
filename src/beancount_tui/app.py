@@ -20,6 +20,7 @@ from beancount_tui.config import (
     default_config_path,
     load_config,
     resolve_bindings,
+    set_theme,
 )
 from beancount_tui.editor import (
     append_entry,
@@ -252,7 +253,11 @@ class BeancountTUI(App):
     BINDINGS = _DEFAULT_BINDINGS
 
     def __init__(
-        self, ledger_path: str | Path, watch_interval: float = DEFAULT_WATCH_INTERVAL
+        self,
+        ledger_path: str | Path,
+        watch_interval: float = DEFAULT_WATCH_INTERVAL,
+        theme: str | None = None,
+        config_path: Path | None = None,
     ) -> None:
         super().__init__()
         self.ledger = Ledger.load(ledger_path)
@@ -264,6 +269,20 @@ class BeancountTUI(App):
         self._watched_mtimes = self.ledger.file_mtimes()
         # Bounded, chronological undo/redo history across every file touched.
         self._undo_manager = UndoManager()
+        # CONFIG-03: the theme named in the config file (if any), applied
+        # once on mount -- see `_apply_startup_theme`. `_config_path` is
+        # whichever config file was actually resolved for this run (the
+        # `--config` override, if given, else the XDG default), since
+        # that's the file any later theme change gets written back to, not
+        # necessarily `default_config_path()` itself.
+        self._configured_theme = theme
+        self._config_path = config_path if config_path is not None else default_config_path()
+        # Set while `_apply_startup_theme` assigns `self.theme` from the
+        # config file, so `watch_theme` (below) knows not to treat that
+        # initial assignment as a *user* change worth writing back out --
+        # only a genuine change (e.g. via the command palette's theme
+        # picker) should persist.
+        self._suppress_theme_persist = False
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -277,9 +296,47 @@ class BeancountTUI(App):
         yield Footer()
 
     def on_mount(self) -> None:
+        self._apply_startup_theme()
         self.sub_title = str(self.ledger.path)
         self.refresh_views()
         self.set_interval(self._watch_interval, self._check_external_changes)
+
+    def _apply_startup_theme(self) -> None:
+        """Apply the `theme` configured in the config file, if any (`CONFIG-03`).
+
+        `App.theme` is a validated Textual reactive: assigning a name that
+        isn't a registered theme raises `InvalidThemeError` rather than just
+        being ignored, so an unknown/invalid name is checked against
+        `self.available_themes` *before* assigning, falling back to
+        Textual's own default (whatever `self.theme` already is at this
+        point) with a warning notification instead of crashing.
+        """
+        theme_name = self._configured_theme
+        if not theme_name:
+            return
+        if theme_name not in self.available_themes:
+            self.notify(
+                f"Unknown theme {theme_name!r} in config file; using default.",
+                severity="warning",
+            )
+            return
+        self._suppress_theme_persist = True
+        self.theme = theme_name
+
+    def watch_theme(self, old_theme: str, new_theme: str) -> None:
+        """Persist a theme change back to the config file (`CONFIG-03`), so
+        a choice made via Textual's built-in command-palette theme picker
+        sticks across restarts instead of resetting to the default every
+        launch.
+
+        Skipped once for the initial assignment `_apply_startup_theme`
+        makes from the config file itself -- there's no need to rewrite the
+        file with the same value it was just read from.
+        """
+        if self._suppress_theme_persist:
+            self._suppress_theme_persist = False
+            return
+        set_theme(self._config_path, new_theme)
 
     def _visible_entries(self) -> list[data.Directive]:
         if self.show_directives:
@@ -1192,7 +1249,12 @@ def main() -> None:
     # happen here, prior to `BeancountTUI(...)` below, rather than after.
     _rebuild_bindings(BeancountTUI, config.get("bindings", {}))
 
-    BeancountTUI(ledger, watch_interval=watch_interval).run()
+    BeancountTUI(
+        ledger,
+        watch_interval=watch_interval,
+        theme=config.get("theme"),
+        config_path=config_path,
+    ).run()
 
 
 if __name__ == "__main__":

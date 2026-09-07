@@ -140,7 +140,7 @@ mutated class-level state shared across the test module.
 
 ### CONFIG-03: Theme selection
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** CONFIG-01
 - **Effort:** 1h
 
@@ -154,10 +154,44 @@ choice sticks between sessions instead of resetting to Textual's default
 every launch.
 
 **Acceptance criteria:**
-- [ ] A `theme` value in the config file is applied on startup.
-- [ ] Changing the theme via Textual's built-in command palette persists
+- [x] A `theme` value in the config file is applied on startup.
+- [x] Changing the theme via Textual's built-in command palette persists
       it to the config file for the next launch.
-- [ ] An invalid/unknown theme name falls back to Textual's default with
+- [x] An invalid/unknown theme name falls back to Textual's default with
       no crash.
-- [ ] Test covering: a config-specified theme applied on startup, and a
+- [x] Test covering: a config-specified theme applied on startup, and a
       theme change persisting to the file.
+
+**Implementation note:** `main()` reads `config.get("theme")` and passes it,
+along with whichever `config_path` was actually resolved for this run (the
+`--config` override if given, else the XDG default), through to
+`BeancountTUI.__init__`. `BeancountTUI._apply_startup_theme` (called from
+`on_mount`, matching Textual's documented idiom for setting `self.theme`)
+validates the configured name against `self.available_themes` *before*
+assigning — `App.theme` is a validated reactive that raises
+`InvalidThemeError` on an unregistered name rather than silently ignoring
+it, so an unknown/invalid name is instead reported via `self.notify(...,
+severity="warning")` and left at Textual's own default, with no crash.
+A `watch_theme(self, old, new)` method persists any subsequent change (e.g.
+via the command-palette theme picker) by calling
+`beancount_tui.config.set_theme(path, name)`; a one-shot
+`_suppress_theme_persist` flag skips the write-back for the initial
+config-driven assignment made at startup, so restarting with an unchanged
+config doesn't needlessly rewrite the file.
+
+**Deliberate deviation — hand-rolled TOML "writer":** `tomllib` (stdlib,
+already used by `CONFIG-01`) is read-only, and pyproject.toml has no TOML
+*writer* dependency (`tomli-w` or similar isn't in `dependencies`/
+`dependency-groups.dev`), and pulling one in for a single scalar key felt
+like overkill per the task brief. `config.set_theme` instead does a
+targeted text edit: it splits the file's lines into the part before the
+first `[section]` header (where a top-level key like `theme` has to live in
+TOML) and everything from that header onward, replaces an existing
+top-level `theme = ...` line in the first part (or appends a new one if
+there wasn't one), and reassembles. This preserves the rest of an arbitrary
+config file's content and comments untouched, but it is **not** a general
+TOML writer — it doesn't understand a `theme` key inside a multi-line
+array/table or an inline table (nothing beancount-tui writes today
+produces one). This is the same narrow-string-replace tradeoff the task
+description explicitly anticipated as acceptable when a full writer
+dependency isn't warranted.
