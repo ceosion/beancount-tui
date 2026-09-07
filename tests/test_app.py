@@ -506,6 +506,90 @@ async def test_delete_cancelled_keeps_transaction(ledger_path):
     assert len(Ledger.load(ledger_path).transactions) == 6
 
 
+async def test_cycle_flag_toggles_transaction_flag(ledger_path):
+    """UX-05: `f` cycles the highlighted transaction's flag * <-> !, only
+    the flag character on disk changing, and it's undoable via `u`."""
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.move_cursor(row=0)
+        assert table.selected_entry.narration == "Opening balance"
+        assert table.selected_entry.flag == "*"
+
+        await pilot.press("f")
+        await pilot.pause()
+        table.move_cursor(row=0)
+        assert table.selected_entry.flag == "!"
+
+        await pilot.press("f")
+        await pilot.pause()
+        table.move_cursor(row=0)
+        assert table.selected_entry.flag == "*"
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert ledger.transactions[0].narration == "Opening balance"
+    assert ledger.transactions[0].flag == "*"
+    # Round-tripped back to the original flag, and only the flag character
+    # differed along the way -- nothing else in the file was disturbed.
+    assert ledger_path.read_text() == original
+
+
+async def test_cycle_flag_persists_and_is_undoable(ledger_path):
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.query_one(TransactionTable).move_cursor(row=0)
+        await pilot.press("f")
+        await pilot.pause()
+
+        after_flag = ledger_path.read_text()
+        assert after_flag != original
+        assert after_flag.replace("! ", "* ", 1) == original
+        assert Ledger.load(ledger_path).transactions[0].flag == "!"
+
+        await pilot.press("u")
+        await pilot.pause()
+
+    assert ledger_path.read_text() == original
+    assert Ledger.load(ledger_path).transactions[0].flag == "*"
+
+
+async def test_cycle_flag_noop_on_directive_row(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("t")  # show directives too
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        note_row = next(
+            i for i, entry in enumerate(table.shown) if isinstance(entry, data.Note)
+        )
+        table.move_cursor(row=note_row)
+        assert not isinstance(table.selected_entry, data.Transaction)
+
+        await pilot.press("f")
+        await pilot.pause()
+
+    assert not Ledger.load(ledger_path).errors
+
+
+async def test_cycle_flag_noop_with_no_selection(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.update_entries([])
+        assert table.selected_entry is None
+
+        await pilot.press("f")
+        await pilot.pause()
+
+    assert not Ledger.load(ledger_path).errors
+
+
 async def test_single_file_form_has_no_file_picker(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

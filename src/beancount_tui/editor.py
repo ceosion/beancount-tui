@@ -8,6 +8,7 @@ that Beancount attaches to every entry it parses.
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from beancount.core import data
@@ -100,6 +101,38 @@ def replace_entry(entry: data.Directive, new_text: str) -> None:
     span = entry_line_span(lines, start)
     replacement = [line + "\n" for line in new_text.rstrip("\n").split("\n")]
     lines[start : start + span] = replacement
+    path.write_text("".join(lines), encoding="utf-8")
+
+
+# Matches a transaction header's leading ``date  flag`` (the flag is always
+# exactly one non-whitespace character per Beancount's grammar).
+_TXN_HEADER_FLAG_RE = re.compile(r"^(\d{4}-\d{2}-\d{2}\s+)(\S)(?=\s|$)")
+
+
+def replace_flag(entry: data.Transaction, new_flag: str) -> None:
+    """Swap `entry`'s flag character in place, touching only that one
+    character in its source file.
+
+    Unlike `replace_entry`, this doesn't re-serialize the whole entry via
+    `format_entry`/`printer.format_entry` -- which fills in Beancount's
+    interpolated amounts for any posting whose amount was elided in the
+    source, changing more than just the flag. Locating and replacing the
+    single character in place keeps the rest of the entry's source text
+    byte-for-byte unchanged.
+    """
+    filename = entry.meta["filename"]
+    lineno = entry.meta["lineno"]
+    path = Path(filename)
+    lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+    index = lineno - 1
+    line = lines[index]
+    match = _TXN_HEADER_FLAG_RE.match(line)
+    if not match:
+        raise TransactionParseError(
+            f"Could not locate a flag character on line {lineno} of {filename}"
+        )
+    start, end = match.start(2), match.end(2)
+    lines[index] = line[:start] + new_flag + line[end:]
     path.write_text("".join(lines), encoding="utf-8")
 
 

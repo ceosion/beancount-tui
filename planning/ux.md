@@ -93,7 +93,7 @@ reading as a wall of similar rows.
 
 ### UX-05: Single-key flag cycling on the highlighted transaction
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1h
 
@@ -110,12 +110,12 @@ edit/duplicate flows, followed by the same `_snapshot_for_undo` +
 change is undoable like any other edit.
 
 **Acceptance criteria:**
-- [ ] Pressing the binding on a highlighted `Transaction` row toggles its
+- [x] Pressing the binding on a highlighted `Transaction` row toggles its
       flag between `*` and `!` and persists the change to the source file.
-- [ ] Pressing it on a highlighted directive row (or with no row selected)
+- [x] Pressing it on a highlighted directive row (or with no row selected)
       is a no-op.
-- [ ] The change is undoable via the existing `u` binding.
-- [ ] Test covering the cycle (`*` → `!` → `*`) against a known transaction
+- [x] The change is undoable via the existing `u` binding.
+- [x] Test covering the cycle (`*` → `!` → `*`) against a known transaction
       and that the on-disk text reflects only the flag character changing.
 
 ---

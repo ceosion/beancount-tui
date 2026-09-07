@@ -13,7 +13,13 @@ from textual.app import App, ComposeResult
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Static
 
-from beancount_tui.editor import append_entry, delete_entry, format_entry, replace_entry
+from beancount_tui.editor import (
+    append_entry,
+    delete_entry,
+    format_entry,
+    replace_entry,
+    replace_flag,
+)
 from beancount_tui.importer import ImportCandidate
 from beancount_tui.ledger import Ledger, RecurringTemplate, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
@@ -164,6 +170,7 @@ class BeancountTUI(App):
         ("e", "edit_transaction", "Edit"),
         ("c", "duplicate_transaction", "Duplicate"),
         ("d", "delete_transaction", "Delete"),
+        ("f", "cycle_flag", "Cycle flag"),
         ("t", "toggle_directives", "Directives"),
         ("v", "toggle_detail", "Detail"),
         ("u", "undo", "Undo"),
@@ -682,6 +689,25 @@ class BeancountTUI(App):
             ConfirmDialog(f"Delete {_entry_summary(entry)}?", confirm_label="Delete"),
             on_result,
         )
+
+    def action_cycle_flag(self) -> None:
+        """Toggle the highlighted transaction's flag between `*` (cleared)
+        and `!` (pending) in place, without opening the full edit form.
+
+        A no-op for a highlighted directive row (or no selection at all) --
+        only ``data.Transaction`` has a meaningful flag to cycle. Uses
+        `editor.replace_flag` rather than the `format_entry`/`replace_entry`
+        pair the edit/duplicate flows use, since re-serializing the whole
+        entry via `format_entry` fills in Beancount's interpolated posting
+        amounts, which would change more than just the flag on disk.
+        """
+        entry = self.query_one(TransactionTable).selected_entry
+        if not isinstance(entry, data.Transaction):
+            return
+        new_flag = "!" if entry.flag == "*" else "*"
+        self._snapshot_for_undo(entry.meta["filename"])
+        replace_flag(entry, new_flag)
+        self.action_reload()
 
 
 def _entry_summary(entry: data.Directive) -> str:
