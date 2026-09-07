@@ -161,7 +161,7 @@ case.
 
 ### BUDGET-06: Discoverability — binding + help screen entry
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** BUDGET-03
 - **Effort:** 0.5h
 
@@ -169,10 +169,15 @@ case.
 for "budget", avoiding existing bindings — confirm against the current
 binding table before picking a key) and add the corresponding entry to the
 `UX-01` help screen so it's discoverable the same way other reports are.
+`g` was already taken (`register`, wired concurrently by another task) and
+so was its usual sibling; bound `G` (capital variant, as suggested) to
+`action_budget` instead. The help screen (`UX-01`) renders straight off
+`BeancountTUI.BINDINGS`, so no separate help-screen edit was needed beyond
+adding the binding itself.
 
 **Acceptance criteria:**
-- [ ] New binding opens `BudgetScreen` from the main screen.
-- [ ] Help screen lists the new binding alongside the other report
+- [x] New binding opens `BudgetScreen` from the main screen.
+- [x] Help screen lists the new binding alongside the other report
       bindings.
-- [ ] Test covering the binding opens the screen (extending the existing
+- [x] Test covering the binding opens the screen (extending the existing
       `test_app.py` binding-coverage pattern).

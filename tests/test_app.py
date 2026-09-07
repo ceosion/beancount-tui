@@ -1747,6 +1747,19 @@ async def test_budget_screen(ledger_path):
         assert not isinstance(app.screen, BudgetScreen)
 
 
+async def test_budget_screen_binding_opens_screen(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("G")
+        await pilot.pause()
+        assert isinstance(app.screen, BudgetScreen)
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BudgetScreen)
+
+
 async def test_trial_balance_screen(ledger_path):
     from textual.widgets import DataTable, Input
 

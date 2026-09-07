@@ -20,6 +20,7 @@ from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
 from beancount_tui.widgets.budget_form import BudgetForm
+from beancount_tui.widgets.budget_screen import BudgetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -172,6 +173,7 @@ class BeancountTUI(App):
         ("p", "pad_and_verify", "Pad and verify"),
         ("g", "register", "Register"),
         ("s", "balance_sheet", "Balance sheet"),
+        ("G", "budget", "Budget vs actual"),
         ("w", "holdings", "Holdings"),
         ("L", "ledger_info", "Ledger info"),
         ("Q", "query_runner", "Query"),
@@ -282,6 +284,9 @@ class BeancountTUI(App):
 
     def action_balance_sheet(self) -> None:
         self.push_screen(BalanceSheetScreen(self.ledger))
+
+    def action_budget(self) -> None:
+        self.push_screen(BudgetScreen(self.ledger))
 
     def action_holdings(self) -> None:
         self.push_screen(HoldingsScreen(self.ledger))
