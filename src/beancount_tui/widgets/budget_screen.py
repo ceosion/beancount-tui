@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Label, Static
 
 from beancount_tui.ledger import Ledger, parse_date_range, resolve_date_preset
+from beancount_tui.widgets.date_input import DateRangeInput
 
 
 def _format_amount(value: Decimal, currency: str) -> str:
@@ -68,7 +69,7 @@ class BudgetScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("[b]Budget vs. actual[/b]", id="title")
-            yield Input(
+            yield DateRangeInput(
                 placeholder=(
                     "Period YYYY-MM-DD..YYYY-MM-DD, or month/last-month/year/last-year "
                     "(empty = current month)"

@@ -16,6 +16,7 @@ from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.budget_form import BudgetForm
 from beancount_tui.widgets.budget_screen import BudgetScreen
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
+from beancount_tui.widgets.date_input import DatePickerScreen
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -218,6 +219,126 @@ async def test_transaction_form_recurring_toggle_reveals_interval_and_until_fiel
         await pilot.pause()
         assert interval.display is False
         assert until.display is False
+
+
+async def test_date_picker_selection_matches_direct_typed_date(ledger_path):
+    """UX-06: picker-driven date selection must produce the exact same
+    ``YYYY-MM-DD`` string a direct type would have."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        date_input = form.query_one("#date", Input)
+
+        # Direct-typing path: clear the field and type an ISO date one
+        # character at a time, exactly as a user preferring the keyboard
+        # fallback would.
+        date_input.value = ""
+        date_input.focus()
+        await pilot.pause()
+        for char in "2026-02-10":
+            await pilot.press(char)
+        typed_value = date_input.value
+        assert typed_value == "2026-02-10"
+
+        # Picker-driven path, starting from a different date, navigating by
+        # month (pagedown) and by day (left) to land on the very same day.
+        date_input.value = "2026-01-15"
+        await pilot.pause()
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, DatePickerScreen)
+        assert picker._selected.isoformat() == "2026-01-15"  # defaults to field's value
+
+        await pilot.press("pagedown")  # 2026-01-15 -> 2026-02-15
+        for _ in range(5):
+            await pilot.press("left")  # 2026-02-15 -> 2026-02-10
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert app.screen is form
+        assert date_input.value == typed_value == "2026-02-10"
+
+
+async def test_date_picker_defaults_to_today_when_field_empty(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        date_input = form.query_one("#date", Input)
+        date_input.value = ""
+        date_input.focus()
+        await pilot.pause()
+
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, DatePickerScreen)
+        assert picker._selected == datetime.date.today()
+
+        await pilot.press("enter")
+        await pilot.pause()
+        assert date_input.value == datetime.date.today().isoformat()
+
+
+async def test_date_picker_escape_cancels_without_changing_field(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+        date_input = form.query_one("#date", Input)
+        date_input.value = "2026-05-05"
+        date_input.focus()
+        await pilot.pause()
+
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        assert isinstance(app.screen, DatePickerScreen)
+
+        await pilot.press("right")
+        await pilot.press("pagedown")
+        await pilot.press("escape")
+        await pilot.pause()
+
+        assert app.screen is form
+        assert date_input.value == "2026-05-05"
+
+
+async def test_date_range_picker_edits_only_the_half_nearest_the_cursor(ledger_path):
+    """UX-06: the filter bar's ``START..END`` range field is a
+    `DateRangeInput`; opening the picker should only replace the half of
+    the range the cursor is in, leaving the other bound untouched."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("/")
+        await pilot.pause()
+        bar = app.query_one(FilterBar)
+        assert bar.has_focus
+
+        bar.value = "2026-01-01..2026-01-31"
+        bar.cursor_position = len(bar.value)  # cursor in the END half
+        await pilot.pause()
+
+        await pilot.press("ctrl+g")
+        await pilot.pause()
+        picker = app.screen
+        assert isinstance(picker, DatePickerScreen)
+        assert picker._selected.isoformat() == "2026-01-31"  # defaults to that half
+
+        await pilot.press("left")  # 2026-01-31 -> 2026-01-30
+        await pilot.press("enter")
+        await pilot.pause()
+
+        assert not isinstance(app.screen, DatePickerScreen)
+        assert bar.value == "2026-01-01..2026-01-30"
 
 
 async def test_new_recurring_transaction_via_form_round_trips_into_recurring_template(

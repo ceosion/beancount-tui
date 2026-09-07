@@ -22,6 +22,7 @@ from textual.widgets import Button, Input, Label, Select, Static
 
 from beancount_tui.editor import TransactionParseError, parse_directives_text
 from beancount_tui.widgets.account_input import AccountInput
+from beancount_tui.widgets.date_input import DateInput
 from beancount_tui.widgets.directive_form import DirectiveFormResult
 
 # Fava's five accepted intervals, canonical long form (matches
@@ -94,7 +95,7 @@ class BudgetForm(ModalScreen[DirectiveFormResult | None]):
         with Vertical():
             yield Label('[b]New budget[/b]')
             yield Label("Date", classes="field-label")
-            yield Input(value=self._date, id="date", placeholder="YYYY-MM-DD")
+            yield DateInput(value=self._date, id="date", placeholder="YYYY-MM-DD")
             yield Label("Account (Tab completes)", classes="field-label")
             yield AccountInput(
                 id="account", accounts=self._accounts, placeholder="Expenses:FIXME"

@@ -13,6 +13,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Label, Static
 
 from beancount_tui.ledger import ForecastReportRow, Ledger, parse_date_range
+from beancount_tui.widgets.date_input import DateRangeInput
 
 # One style per ``ForecastReportRow.status`` value so a mixed-composition
 # report stays scannable, the same convention ``transaction_table.py``'s
@@ -111,7 +112,7 @@ class ForecastScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("[b]Cash-flow forecast[/b]")
-            yield Input(
+            yield DateRangeInput(
                 placeholder=(
                     "Period YYYY-MM-DD..YYYY-MM-DD, or month/last-month/year/last-year "
                     "(empty = today through 3 months forward)"

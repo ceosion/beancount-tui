@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Label, Static
 
 from beancount_tui.ledger import Ledger, format_inventory
+from beancount_tui.widgets.date_input import DateInput
 
 
 class BalanceSheetScreen(ModalScreen[None]):
@@ -51,7 +52,7 @@ class BalanceSheetScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("[b]Balance sheet[/b]")
-            yield Input(
+            yield DateInput(
                 value=datetime.date.today().isoformat(),
                 placeholder="As-of date YYYY-MM-DD",
                 id="as-of",

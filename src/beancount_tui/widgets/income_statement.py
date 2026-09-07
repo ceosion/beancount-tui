@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Input, Label, Static
 
 from beancount_tui.ledger import Ledger, format_inventory, parse_date_range, parse_periods
+from beancount_tui.widgets.date_input import DateRangeInput
 
 
 class IncomeStatementScreen(ModalScreen[None]):
@@ -51,7 +52,7 @@ class IncomeStatementScreen(ModalScreen[None]):
     def compose(self) -> ComposeResult:
         with Vertical():
             yield Label("[b]Income statement[/b]")
-            yield Input(
+            yield DateRangeInput(
                 placeholder=(
                     "Period YYYY-MM-DD..YYYY-MM-DD, or compare periods "
                     "comma-separated: month,last-month"
