@@ -226,6 +226,55 @@ def test_entry_row_shows_tags_and_links():
     assert row[3] == "Coffee #vacation ^receipt-123"
 
 
+def test_entry_row_marks_recurring_transaction():
+    """A #recurring template is excluded from every report (FORECAST-02),
+    but it still needs to be visible/editable in the main transaction
+    table -- so it gets a "↻" marker distinguishing it from real activity.
+    """
+    txn = data.Transaction(
+        meta={},
+        date=datetime.date(2026, 2, 1),
+        flag="*",
+        payee="Landlord",
+        narration="Rent",
+        tags=frozenset({"recurring"}),
+        links=frozenset(),
+        postings=[],
+    )
+    row = _entry_row(txn)
+    assert row[3] == "↻ Rent #recurring"
+
+
+async def test_recurring_transaction_visible_and_marked_in_table(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        row_index = next(
+            i for i, e in enumerate(table.shown)
+            if isinstance(e, data.Transaction) and "recurring" in (e.tags or set())
+        )
+        row = table.get_row_at(row_index)
+        # Still visible in the main table (not filtered out)...
+        assert str(row[2]) == "Landlord"
+        # ...and clearly marked as a template, not real activity.
+        assert "↻" in str(row[3])
+
+        # Still editable/deletable like any other row: it's a normal cursor
+        # position with a real underlying Transaction, not a placeholder.
+        table.move_cursor(row=row_index)
+        assert table.selected_entry is not None
+        assert isinstance(table.selected_entry, data.Transaction)
+        assert "recurring" in (table.selected_entry.tags or set())
+
+
 async def test_delete_transaction_with_confirmation(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

@@ -309,6 +309,36 @@ class Ledger:
         return [e for e in self.entries if isinstance(e, data.Transaction)]
 
     @property
+    def _actual_entries(self) -> list[data.Directive]:
+        """``self.entries`` minus ``#recurring`` template transactions.
+
+        A ``#recurring``-tagged transaction (see ``_parse_recurring_templates``)
+        is a template, not something that actually happened, so every
+        actual-data report (income statement, balance sheet, trial balance,
+        register, holdings, the account-tree realization) must exclude it.
+        Non-transaction entries (opens, closes, pads, prices, ...) all stay,
+        since only transactions can carry the ``#recurring`` tag.
+        """
+        return [
+            e
+            for e in self.entries
+            if not (isinstance(e, data.Transaction) and "recurring" in (e.tags or set()))
+        ]
+
+    @property
+    def _actual_transactions(self) -> list[data.Transaction]:
+        """``self.transactions`` minus ``#recurring`` template transactions.
+
+        The filtered counterpart every report method should iterate instead
+        of ``self.transactions``, so a template's postings never skew a
+        computed total. The main transaction table deliberately keeps using
+        ``self.transactions`` (via ``transactions_for_account``) so templates
+        remain visible and editable there, marked with a "↻" prefix
+        (see ``transaction_table._entry_row``).
+        """
+        return [e for e in self._actual_entries if isinstance(e, data.Transaction)]
+
+    @property
     def accounts(self) -> list[str]:
         """All account names that appear in the ledger, sorted."""
         return sorted(getters.get_accounts(self.entries))
@@ -721,7 +751,7 @@ class Ledger:
         name_income = self.options.get("name_income", "Income")
         name_expenses = self.options.get("name_expenses", "Expenses")
         per_account: dict[str, Inventory] = {}
-        for txn in self.transactions:
+        for txn in self._actual_transactions:
             if start is not None and txn.date < start:
                 continue
             if end is not None and txn.date > end:
@@ -761,7 +791,7 @@ class Ledger:
         if as_of is None:
             as_of = datetime.date.today()
         per_account: dict[str, Inventory] = {}
-        for txn in self.transactions:
+        for txn in self._actual_transactions:
             if txn.date > as_of:
                 continue
             for posting in txn.postings:
@@ -793,7 +823,7 @@ class Ledger:
         name_liabilities = self.options.get("name_liabilities", "Liabilities")
         name_equity = self.options.get("name_equity", "Equity")
         per_account: dict[str, Inventory] = {}
-        for txn in self.transactions:
+        for txn in self._actual_transactions:
             if txn.date > as_of:
                 continue
             for posting in txn.postings:
@@ -865,7 +895,7 @@ class Ledger:
         price_map = prices.build_price_map(self.entries)
 
         per_key: dict[tuple[str, str], dict] = {}
-        for txn in self.transactions:
+        for txn in self._actual_transactions:
             if txn.date > as_of:
                 continue
             for posting in txn.postings:
@@ -934,14 +964,28 @@ class Ledger:
                 mtimes[file] = -1.0
         return mtimes
 
-    def transactions_for_account(self, account: str | None) -> list[data.Transaction]:
-        """Transactions posting to ``account`` or any of its sub-accounts."""
+    def transactions_for_account(
+        self,
+        account: str | None,
+        transactions: list[data.Transaction] | None = None,
+    ) -> list[data.Transaction]:
+        """Transactions posting to ``account`` or any of its sub-accounts.
+
+        Filters ``transactions`` (default ``self.transactions``, i.e.
+        including ``#recurring`` templates — the main transaction table
+        relies on that default so templates stay visible/editable there).
+        ``register`` passes ``self._actual_transactions`` instead, so its
+        report excludes them, without duplicating this account-matching
+        logic.
+        """
+        if transactions is None:
+            transactions = self.transactions
         if account is None:
-            return self.transactions
+            return transactions
         prefix = account + ":"
         return [
             txn
-            for txn in self.transactions
+            for txn in transactions
             if any(p.account == account or p.account.startswith(prefix) for p in txn.postings)
         ]
 
@@ -953,9 +997,14 @@ class Ledger:
         that transaction's posting(s) to the account summed into a single
         amount and the running balance immediately after. Multiple
         currencies coexist in each ``Inventory`` without mixing.
+        ``#recurring`` template transactions are excluded, like every other
+        actual-data report (see ``_actual_transactions``).
         """
         prefix = account + ":"
-        txns = sorted(self.transactions_for_account(account), key=lambda txn: txn.date)
+        txns = sorted(
+            self.transactions_for_account(account, self._actual_transactions),
+            key=lambda txn: txn.date,
+        )
         running = Inventory()
         rows: list[RegisterRow] = []
         for txn in txns:
@@ -978,8 +1027,14 @@ class Ledger:
         return rows
 
     def root_account(self) -> realization.RealAccount:
-        """The realized account tree, with balances, for the account sidebar."""
-        return realization.realize(self.entries)
+        """The realized account tree, with balances, for the account sidebar.
+
+        Realized over ``_actual_entries`` rather than ``self.entries``, so a
+        ``#recurring`` template's postings don't skew sidebar balances —
+        opens/closes/pads/etc. are all still included, only template
+        transactions are excluded.
+        """
+        return realization.realize(self._actual_entries)
 
     def _price_map_cached(self):
         """The ledger's price map (from ``Price`` directives), built once and

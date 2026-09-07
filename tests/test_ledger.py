@@ -1095,3 +1095,177 @@ def test_recurring_templates_ignores_untagged_transactions(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert ledger.recurring_templates == []
     assert not ledger.errors
+
+
+# --- FORECAST-02: #recurring templates excluded from actual-data reports ---
+#
+# A #recurring transaction is real Beancount data (see the parsing tests
+# above), but it's a template, not something that happened — every report
+# that summarizes actual activity must exclude it. Each test below adds a
+# #recurring transaction large enough to obviously skew the report if it
+# were wrongly included, then asserts the report matches the same baseline
+# values the non-recurring tests above already pin down.
+
+_RECURRING_RENT = (
+    '2026-02-01 * "Landlord" "Rent" #recurring\n'
+    '  recurring-freq: "monthly"\n'
+    "  Expenses:Rent      50000.00 USD\n"
+    "  Assets:Checking\n"
+)
+
+
+def test_income_statement_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    stmt = ledger.income_statement()
+    # Same totals as test_income_statement_all_dates -- the 50,000.00 USD
+    # recurring "Rent" posting must not show up in Expenses:Rent or net.
+    assert {a: format_inventory(b) for a, b in stmt.expenses} == {
+        "Expenses:Food:Groceries": "87.35 USD",
+        "Expenses:Food:Restaurant": "64.20 USD",
+        "Expenses:Rent": "1,450.00 USD",
+    }
+    assert format_inventory(stmt.expenses_total) == "1,601.55 USD"
+    assert format_inventory(stmt.net) == "2,598.45 USD"
+
+
+def test_trial_balance_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    balances = {
+        a: format_inventory(b)
+        for a, b in ledger.trial_balance(as_of=datetime.date(2026, 3, 1))
+    }
+    # Same as test_trial_balance_all_accounts -- Expenses:Rent and
+    # Assets:Checking are untouched by the 50,000.00 USD recurring posting.
+    assert balances == {
+        "Assets:Checking": "4,098.45 USD",
+        "Assets:Savings": "1,000.00 USD",
+        "Equity:Opening-Balances": "-2,500.00 USD",
+        "Expenses:Food:Groceries": "87.35 USD",
+        "Expenses:Food:Restaurant": "64.20 USD",
+        "Expenses:Rent": "1,450.00 USD",
+        "Income:Salary": "-4,200.00 USD",
+    }
+
+
+def test_balance_sheet_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    sheet = ledger.balance_sheet(as_of=datetime.date(2026, 3, 1))
+    # Same as test_balance_sheet_all_accounts -- Assets:Checking would be
+    # 50,000.00 USD lower if the recurring posting were wrongly included.
+    assert {a: format_inventory(b) for a, b in sheet.assets} == {
+        "Assets:Checking": "4,098.45 USD",
+        "Assets:Savings": "1,000.00 USD",
+    }
+    assert format_inventory(sheet.assets_total) == "5,098.45 USD"
+    assert format_inventory(sheet.net_income) == "2,598.45 USD"
+    assert sheet.assets_total == sheet.liabilities_total + sheet.equity_total + sheet.net_income
+
+
+def test_register_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    rows = ledger.register("Assets:Checking")
+    # Same sequence as test_register_running_balance -- no extra row for the
+    # recurring "Rent" template, and the running balance never dips by
+    # 50,000.00 USD.
+    assert [
+        (
+            r.date,
+            r.narration,
+            format_inventory(r.posting_amount),
+            format_inventory(r.running_balance),
+        )
+        for r in rows
+    ] == [
+        (datetime.date(2026, 1, 1), "Opening balance", "2,500.00 USD", "2,500.00 USD"),
+        (datetime.date(2026, 1, 5), "Salary", "4,200.00 USD", "6,700.00 USD"),
+        (datetime.date(2026, 1, 6), "Weekly groceries", "-87.35 USD", "6,612.65 USD"),
+        (datetime.date(2026, 1, 10), "January rent", "-1,450.00 USD", "5,162.65 USD"),
+        (datetime.date(2026, 1, 14), "Dinner with friends", "-64.20 USD", "5,098.45 USD"),
+        (datetime.date(2026, 1, 15), "Transfer to savings", "-1,000.00 USD", "4,098.45 USD"),
+    ]
+
+
+def test_root_account_excludes_recurring_template(ledger_path):
+    append_entry(ledger_path, _RECURRING_RENT)
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    root = ledger.root_account()
+    checking = root["Assets"]["Checking"]
+    balance = checking.balance.reduce(lambda pos: pos.units)
+    amounts = {(pos.units.number, pos.units.currency) for pos in balance}
+    # Same as test_root_account_has_balances -- unaffected by the recurring
+    # 50,000.00 USD posting.
+    assert amounts == {(Decimal("4098.45"), "USD")}
+
+
+def test_holdings_excludes_recurring_template(ledger_path):
+    append_entry(
+        ledger_path,
+        "2026-01-01 open Assets:Investments  HOOL\n\n"
+        '2026-02-01 * "Broker" "Recurring stock buy" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Assets:Investments  10 HOOL {500.00 USD}\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    report = ledger.holdings(as_of=datetime.date(2026, 3, 1))
+    # The recurring costed-lot "buy" must not create a holding.
+    assert report.holdings == []
+    assert format_inventory(report.net_worth) == ""
+
+
+def test_ledger_with_only_recurring_template_shows_zero_activity(tmp_path):
+    """A ledger with nothing but opens and a #recurring template has no
+    actual activity at all -- every report should come back empty/zero,
+    even though the template itself is real, parseable transaction data.
+    """
+    path = tmp_path / "only-template.beancount"
+    path.write_text(
+        'option "operating_currency" "USD"\n\n'
+        "2026-01-01 open Assets:Checking  USD\n"
+        "2026-01-01 open Expenses:Rent    USD\n\n"
+        '2026-02-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+        encoding="utf-8",
+    )
+    ledger = Ledger.load(path)
+    assert not ledger.errors
+    # The template is real data -- it shows up in the raw transaction list
+    # and as a parsed recurring template -- just not in any report below.
+    assert len(ledger.transactions) == 1
+    assert len(ledger.recurring_templates) == 1
+
+    stmt = ledger.income_statement()
+    assert stmt.income == []
+    assert stmt.expenses == []
+    assert format_inventory(stmt.net) == ""
+
+    assert ledger.trial_balance(as_of=datetime.date(2026, 3, 1)) == []
+
+    sheet = ledger.balance_sheet(as_of=datetime.date(2026, 3, 1))
+    assert sheet.assets == []
+    assert sheet.liabilities == []
+    assert sheet.equity == []
+    assert format_inventory(sheet.net_income) == ""
+
+    assert ledger.register("Assets:Checking") == []
+    assert ledger.register("Expenses:Rent") == []
+
+    report = ledger.holdings(as_of=datetime.date(2026, 3, 1))
+    assert report.holdings == []
+    assert format_inventory(report.net_worth) == ""
+
+    root = ledger.root_account()
+    checking = root["Assets"]["Checking"]
+    assert checking.balance.is_empty()

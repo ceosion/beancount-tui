@@ -162,6 +162,11 @@ def _entry_row(entry: data.Directive) -> tuple[str, str | Text, str, str, str]:
             narration = f"{narration} {tags_links}".strip()
         if has_user_metadata(entry):
             narration = f"{narration} +".strip()
+        if "recurring" in (entry.tags or set()):
+            # A #recurring transaction is a template, not actual activity
+            # (see Ledger._actual_transactions) -- it's excluded from every
+            # report but stays visible/editable here, so mark it clearly.
+            narration = f"↻ {narration}".strip()
         return (date, entry.flag or "*", entry.payee or "", narration,
                 transaction_amount(entry))
     if isinstance(entry, data.Open):

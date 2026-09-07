@@ -62,7 +62,7 @@ malformed data does — via the existing error panel, not a crash.
 
 ### FORECAST-02: Exclude recurring templates from actual-data views
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-01
 - **Effort:** 1h
 
@@ -78,13 +78,13 @@ transaction table so they remain visible/editable/deletable like any other
 transaction.
 
 **Acceptance criteria:**
-- [ ] `#recurring`-tagged transactions are excluded from income statement,
+- [x] `#recurring`-tagged transactions are excluded from income statement,
       balance sheet, trial balance, register, and holdings computations.
-- [ ] They remain visible (with a distinguishing marker) and editable in the
+- [x] They remain visible (with a distinguishing marker) and editable in the
       main transaction table.
-- [ ] A ledger with only a `#recurring` template and no real postings shows
+- [x] A ledger with only a `#recurring` template and no real postings shows
       zero actual activity in every report.
-- [ ] Test covering a template transaction that would visibly skew a
+- [x] Test covering a template transaction that would visibly skew a
       report's totals if it were incorrectly included.
 
 ---
