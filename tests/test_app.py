@@ -5,7 +5,7 @@ from pathlib import Path
 
 from beancount.core import data
 from rich.text import Text
-from textual.widgets import Checkbox, DataTable, Input, OptionList, Select, Static
+from textual.widgets import Button, Checkbox, DataTable, Input, OptionList, Select, Static
 
 from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry, format_entry, parse_transaction_text
@@ -4134,3 +4134,139 @@ async def test_query_runner_screen_saved_query_picker(ledger_path):
             table.get_row_at(i)[0]: table.get_row_at(i)[1] for i in range(table.row_count)
         }
         assert rows["Assets:Checking"] == "4,098.45 USD"
+
+
+async def test_query_runner_export_csv(ledger_path, tmp_path):
+    import csv
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELECT account, sum(position) AS total GROUP BY account"
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        out_path = tmp_path / "out.csv"
+        export_input = screen.query_one("#export-path", Input)
+        export_input.value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        with out_path.open(newline="", encoding="utf-8") as fh:
+            rows = {row[0]: row[1] for row in csv.reader(fh) if row and row[0] != "account"}
+        assert rows["Assets:Checking"] == "(4098.45 USD)"
+
+        error = screen.query_one("#export-error", Static)
+        assert str(error.render()) == ""
+
+
+async def test_query_runner_export_json(ledger_path, tmp_path):
+    import json
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELECT account, sum(position) AS total GROUP BY account"
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        out_path = tmp_path / "out.json"
+        screen.query_one("#export-format", Select).value = "json"
+        export_input = screen.query_one("#export-path", Input)
+        export_input.value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert out_path.exists()
+        records = json.loads(out_path.read_text(encoding="utf-8"))
+        by_account = {rec["account"]: rec["total"] for rec in records}
+        assert by_account["Assets:Checking"] == [{"number": "4098.45", "currency": "USD"}]
+
+
+async def test_query_runner_export_missing_parent_dir_shows_inline_error(ledger_path, tmp_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELECT account, sum(position) AS total GROUP BY account"
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        bad_path = tmp_path / "no-such-dir" / "out.csv"
+        export_input = screen.query_one("#export-path", Input)
+        export_input.value = str(bad_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        assert not bad_path.exists()
+        error = screen.query_one("#export-error", Static)
+        assert str(error.render()) != ""
+        # Still alive, modal still open -- no crash.
+        assert isinstance(app.screen, QueryRunnerScreen)
+
+
+async def test_query_runner_export_existing_path_prompts_confirmation(ledger_path, tmp_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("Q")
+        await pilot.pause()
+        screen = app.screen
+        assert isinstance(screen, QueryRunnerScreen)
+
+        query_input = screen.query_one("#query", Input)
+        query_input.value = "SELECT account, sum(position) AS total GROUP BY account"
+        query_input.focus()
+        await pilot.press("enter")
+        await pilot.pause()
+
+        out_path = tmp_path / "out.csv"
+        out_path.write_text("stale content\n", encoding="utf-8")
+        export_input = screen.query_one("#export-path", Input)
+        export_input.value = str(out_path)
+        await pilot.pause()
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        # Cancelling leaves the stale file untouched.
+        await pilot.press("escape")
+        await pilot.pause()
+        assert out_path.read_text(encoding="utf-8") == "stale content\n"
+        assert isinstance(app.screen, QueryRunnerScreen)
+
+        # Re-triggering and confirming overwrites it.
+        screen.query_one("#export", Button).press()
+        await pilot.pause()
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+        assert out_path.read_text(encoding="utf-8") != "stale content\n"
+        assert "Assets:Checking" in out_path.read_text(encoding="utf-8")
