@@ -145,7 +145,7 @@ appended anywhere.
 
 ### FORECAST-05: Budget fallback for untemplated accounts
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-04, BUDGET-02
 - **Effort:** 1.5h
 
@@ -158,13 +158,13 @@ never both). Accounts with neither a template nor a budget contribute
 nothing to the projection, same as today's clean-absence behavior.
 
 **Acceptance criteria:**
-- [ ] An account with a budget but no template gets its prorated target as
+- [x] An account with a budget but no template gets its prorated target as
       projected spend for days with no explicit instance.
-- [ ] An account with a template covering a given day does not also draw a
+- [x] An account with a template covering a given day does not also draw a
       budget-fallback amount for that same day.
-- [ ] An account with neither a template nor a budget projects zero
+- [x] An account with neither a template nor a budget projects zero
       additional activity.
-- [ ] Test covering all three cases (template-only, budget-only, neither)
+- [x] Test covering all three cases (template-only, budget-only, neither)
       over the same forecast window.
 
 ---

@@ -341,6 +341,37 @@ class ProjectedTransaction:
 
 
 @dataclass
+class ForecastedActivity:
+    """One day's blended projected amount for one account/currency (``FORECAST-05``).
+
+    ``Ledger.forecast`` produces one of these per ``(account, currency,
+    date)`` that has either a template instance or a budget covering it —
+    never both for the same day, per ``explicit``:
+
+    - ``explicit=True``: ``amount`` is the sum of a ``ProjectedTransaction``
+      instance's actual posting amount(s) to this account/currency on this
+      date (``FORECAST-04``'s generated instances) — real template data,
+      not an estimate.
+    - ``explicit=False``: no template instance touched this account/currency
+      on this date, so ``amount`` is the budget fallback — this single
+      day's prorated share of the account's ``BUDGET-02`` target
+      (``Ledger.budget_target(account, currency, date, date)``), an assumed
+      figure rather than something a template actually specified.
+
+    ``FORECAST-06``'s report screen uses ``explicit`` to visually
+    distinguish "explicit" (from a template) rows from "assumed"
+    (budget-fallback) rows, so it's carried on every row rather than left
+    for the caller to re-derive.
+    """
+
+    date: datetime.date
+    account: str
+    currency: str
+    amount: Decimal
+    explicit: bool
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -705,9 +736,13 @@ class Ledger:
         ``BudgetReportRow``) and a single currency, since a budget target is
         per-currency (``budget_target``) and the "actual" side needs to
         match it exactly rather than mixing currencies into an ``Inventory``.
+        Iterates ``self._actual_transactions`` (excluding ``#recurring``
+        templates), same as every other actual-data view (``FORECAST-02``) —
+        a template transaction is projection data, not something that
+        happened, so it must not skew this "Actual" column either.
         """
         total = Decimal(0)
-        for txn in self.transactions:
+        for txn in self._actual_transactions:
             if txn.date < start or txn.date > end:
                 continue
             for posting in txn.postings:
@@ -824,6 +859,80 @@ class Ledger:
                 )
 
         return sorted(flat_rows + synthesized, key=lambda row: (row.account, row.currency))
+
+    def forecast(
+        self, start: datetime.date, end: datetime.date
+    ) -> list[ForecastedActivity]:
+        """Blended per-day projected activity for ``[start, end]`` (``FORECAST-05``).
+
+        Combines two layers, per ``(account, currency, date)``, matching the
+        milestone's "explicit beats assumed, never both" rule:
+
+        - **Explicit**: every ``ProjectedTransaction`` from
+          ``project_recurring(start, end)`` (``FORECAST-04``) contributes its
+          posting amounts, summed per account/currency on that instance's
+          own date, as an ``explicit=True`` row.
+        - **Assumed (budget fallback)**: for every ``(account, currency)``
+          pair that has a budget at all — derived from ``self.budgets`` the
+          same way ``budget_report`` derives its universe, since
+          ``budget_target`` alone can't tell "no budget" apart from "budget
+          prorates to zero" — and whose series has actually started by
+          ``end`` (mirrors ``budget_report``'s own "active in period" check,
+          so a budget that hasn't taken effect yet doesn't generate a run of
+          meaningless zero rows), each day in ``[start, end]`` with no
+          explicit row for that exact account/currency gets an
+          ``explicit=False`` row: that single day's prorated target
+          (``budget_target(account, currency, day, day)``).
+
+        Resolution is per account/currency/day, not per account overall: a
+        template instance on the 5th only suppresses that account/currency's
+        budget fallback on the 5th, not the rest of the month. An
+        account/currency with neither a template instance nor a budget never
+        appears (clean absence, the same convention ``budget_target`` itself
+        documents).
+
+        Sorted by date, then account, then currency.
+        """
+        explicit: dict[tuple[datetime.date, str, str], Decimal] = {}
+        for instance in self.project_recurring(start, end):
+            for posting in instance.postings:
+                if posting.units is None or posting.units.number is None:
+                    continue
+                key = (instance.date, posting.account, posting.units.currency)
+                explicit[key] = explicit.get(key, Decimal(0)) + posting.units.number
+
+        rows: list[ForecastedActivity] = [
+            ForecastedActivity(
+                date=date, account=account, currency=currency, amount=amount, explicit=True
+            )
+            for (date, account, currency), amount in explicit.items()
+        ]
+
+        budget_pairs: dict[tuple[str, str], None] = {}
+        for budget in self.budgets:
+            budget_pairs.setdefault((budget.account, budget.amount.currency), None)
+
+        one_day = datetime.timedelta(days=1)
+        for account, currency in budget_pairs:
+            series = self._budget_series(account, currency)
+            if not series or series[0].date > end:
+                continue
+            day = start
+            while day <= end:
+                if (day, account, currency) not in explicit:
+                    rows.append(
+                        ForecastedActivity(
+                            date=day,
+                            account=account,
+                            currency=currency,
+                            amount=self.budget_target(account, currency, day, day),
+                            explicit=False,
+                        )
+                    )
+                day += one_day
+
+        rows.sort(key=lambda row: (row.date, row.account, row.currency))
+        return rows
 
     @property
     def queries(self) -> list[data.Query]:
