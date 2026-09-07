@@ -11,6 +11,7 @@ from beancount_tui.ledger import (
     BudgetEntry,
     BudgetReportRow,
     Ledger,
+    ProjectedTransaction,
     RecurringTemplate,
     filter_transactions,
     format_inventory,
@@ -1269,3 +1270,242 @@ def test_ledger_with_only_recurring_template_shows_zero_activity(tmp_path):
     root = ledger.root_account()
     checking = root["Assets"]["Checking"]
     assert checking.balance.is_empty()
+
+
+# --- FORECAST-04: projection engine (virtual instance generation) ---
+
+
+def test_project_recurring_empty_when_no_templates(ledger_path):
+    ledger = Ledger.load(ledger_path)
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+    assert projected == []
+
+
+def test_project_recurring_daily(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-04-01 * "Coffee Shop" "Coffee" #recurring\n'
+        '  recurring-freq: "daily"\n'
+        "  Expenses:Food:Restaurant  5.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 4, 1), datetime.date(2026, 4, 5))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 4, 1),
+        datetime.date(2026, 4, 2),
+        datetime.date(2026, 4, 3),
+        datetime.date(2026, 4, 4),
+        datetime.date(2026, 4, 5),
+    ]
+
+
+def test_project_recurring_weekly(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-04-02 * "Gym" "Membership" #recurring\n'
+        '  recurring-freq: "weekly"\n'
+        "  Expenses:Food:Restaurant  20.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 4, 1), datetime.date(2026, 4, 23))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 4, 2),
+        datetime.date(2026, 4, 9),
+        datetime.date(2026, 4, 16),
+        datetime.date(2026, 4, 23),
+    ]
+
+
+def test_project_recurring_monthly_across_multi_month_range(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 4, 30))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 1, 1),
+        datetime.date(2026, 2, 1),
+        datetime.date(2026, 3, 1),
+        datetime.date(2026, 4, 1),
+    ]
+    # Payee/narration/postings are reused as-is from the source transaction.
+    template = ledger.recurring_templates[0]
+    first = projected[0]
+    assert isinstance(first, ProjectedTransaction)
+    assert first.payee == "Landlord"
+    assert first.narration == "Rent"
+    assert first.postings == template.transaction.postings
+    assert first.template is template
+
+
+def test_project_recurring_quarterly_across_multi_month_range(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-15 * "Insurer" "Premium" #recurring\n'
+        '  recurring-freq: "quarterly"\n'
+        "  Expenses:Rent      300.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 1, 15),
+        datetime.date(2026, 4, 15),
+        datetime.date(2026, 7, 15),
+        datetime.date(2026, 10, 15),
+    ]
+
+
+def test_project_recurring_yearly_across_multi_year_range(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-03-01 * "Domain Registrar" "Renewal" #recurring\n'
+        '  recurring-freq: "yearly"\n'
+        "  Expenses:Rent      15.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2028, 12, 31))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 3, 1),
+        datetime.date(2027, 3, 1),
+        datetime.date(2028, 3, 1),
+    ]
+
+
+def test_project_recurring_day_31_clamps_into_february(ledger_path):
+    # A monthly template dated the 31st must not skip or crash in February
+    # (28 days in 2026, a non-leap year) -- and must snap back to the 31st
+    # once a month is long enough again, rather than drifting down forever.
+    append_entry(
+        ledger_path,
+        '2026-01-31 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 6, 30))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 1, 31),
+        datetime.date(2026, 2, 28),
+        datetime.date(2026, 3, 31),
+        datetime.date(2026, 4, 30),
+        datetime.date(2026, 5, 31),
+        datetime.date(2026, 6, 30),
+    ]
+
+
+def test_project_recurring_stops_at_recurring_until_even_if_range_extends_further(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        '  recurring-until: "2026-03-31"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    # Requested range runs through the end of the year, well past the
+    # template's own cutoff.
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 1, 1),
+        datetime.date(2026, 2, 1),
+        datetime.date(2026, 3, 1),
+    ]
+
+
+def test_project_recurring_until_exactly_on_boundary_is_inclusive(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        '  recurring-until: "2026-03-01"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 12, 31))
+    # The occurrence that lands exactly on recurring-until is included, not
+    # excluded.
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 1, 1),
+        datetime.date(2026, 2, 1),
+        datetime.date(2026, 3, 1),
+    ]
+
+
+def test_project_recurring_template_starting_after_range_start_only_generates_from_its_own_first_occurrence(
+    ledger_path,
+):
+    append_entry(
+        ledger_path,
+        '2026-03-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    # The requested range starts well before the template's own first_date.
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 6, 30))
+    assert [p.date for p in projected] == [
+        datetime.date(2026, 3, 1),
+        datetime.date(2026, 4, 1),
+        datetime.date(2026, 5, 1),
+        datetime.date(2026, 6, 1),
+    ]
+
+
+def test_project_recurring_template_starting_after_range_end_generates_nothing(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-09-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 6, 30))
+    assert projected == []
+
+
+def test_project_recurring_covers_multiple_templates_independently(ledger_path):
+    append_entry(
+        ledger_path,
+        '2026-01-01 * "Landlord" "Rent" #recurring\n'
+        '  recurring-freq: "monthly"\n'
+        "  Expenses:Rent      1450.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-01-15 * "Insurer" "Premium" #recurring\n'
+        '  recurring-freq: "quarterly"\n'
+        "  Expenses:Rent      300.00 USD\n"
+        "  Assets:Checking\n",
+    )
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    projected = ledger.project_recurring(datetime.date(2026, 1, 1), datetime.date(2026, 3, 31))
+    rent_dates = [p.date for p in projected if p.narration == "Rent"]
+    premium_dates = [p.date for p in projected if p.narration == "Premium"]
+    assert rent_dates == [
+        datetime.date(2026, 1, 1),
+        datetime.date(2026, 2, 1),
+        datetime.date(2026, 3, 1),
+    ]
+    assert premium_dates == [datetime.date(2026, 1, 15)]
