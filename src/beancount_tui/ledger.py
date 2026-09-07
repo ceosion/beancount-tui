@@ -372,6 +372,47 @@ class ForecastedActivity:
 
 
 @dataclass
+class ForecastReportRow:
+    """One blended row of ``Ledger.forecast_report`` (``FORECAST-06``): real
+    activity through ``today`` plus projected activity for the rest of the
+    period, for one account/currency.
+
+    ``actual`` is real posted activity dated in ``[start, today)`` (today
+    itself excluded, matching where ``forecast`` starts projecting from) —
+    the same date-filter-then-sum idiom ``income_statement``/
+    ``budget_report`` use, narrowed to one account/currency with no sign
+    inversion (same convention as ``BudgetReportRow``: budgets and their
+    actuals share a sign, so summing them directly is meaningful).
+
+    ``projected`` is the sum of ``Ledger.forecast``'s amounts touching this
+    account/currency in ``[today, end]``. ``status`` describes what backs
+    ``projected``:
+
+    - ``"explicit"``: every contributing forecast row came from a
+      recurring-template instance.
+    - ``"assumed"``: every contributing row was a budget-fallback figure.
+    - ``"mixed"``: some of both, on different days within the period.
+    - ``"actual"``: no forecast rows at all for this account/currency in
+      the period's future portion (``projected`` is a flat zero) — either
+      the requested range ends before ``today``, or this account/currency
+      simply has no template/budget coverage in the future window even
+      though it appeared in the report's account universe via past
+      activity.
+
+    ``total`` is ``actual + projected``, the one number a user skimming the
+    report cares about most: what this account is on track to net over the
+    whole period, real and projected combined.
+    """
+
+    account: str
+    currency: str
+    actual: Decimal
+    projected: Decimal
+    status: str
+    total: Decimal
+
+
+@dataclass
 class Ledger:
     """A loaded Beancount ledger.
 
@@ -932,6 +973,101 @@ class Ledger:
                 day += one_day
 
         rows.sort(key=lambda row: (row.date, row.account, row.currency))
+        return rows
+
+    def forecast_report(
+        self,
+        start: datetime.date,
+        end: datetime.date,
+        today: datetime.date | None = None,
+    ) -> list[ForecastReportRow]:
+        """Blended actual-through-today + projected-from-today report (``FORECAST-06``).
+
+        Splits ``[start, end]`` at ``today`` (real current date unless
+        overridden, matching ``budget_target``/``resolve_date_preset``'s own
+        testability convention): real posted activity covers
+        ``[start, today)``, ``Ledger.forecast`` covers ``[today, end]`` —
+        ``forecast`` is a template+budget *projection*, not a general ledger
+        query, so it's never asked for a day that's already happened.
+
+        The account/currency universe reported on is independent of
+        ``start``/``end`` (any budget active by ``end``, plus every account
+        a recurring template posts to) rather than "whatever happened to
+        have activity in this exact window" — so a request landing entirely
+        on one side of ``today`` still resolves the same meaningful set of
+        accounts instead of an arbitrarily empty or actual-data-only table.
+
+        Rows are sorted by account, then currency.
+        """
+        if today is None:
+            today = datetime.date.today()
+
+        # Universe: every (account, currency) pair this report cares about,
+        # mirroring how ``forecast`` itself derives "has a budget at all"
+        # and "template posts to this account" -- see below.
+        universe: set[tuple[str, str]] = set()
+        budget_pairs: dict[tuple[str, str], None] = {}
+        for budget in self.budgets:
+            budget_pairs.setdefault((budget.account, budget.amount.currency), None)
+        for account, currency in budget_pairs:
+            series = self._budget_series(account, currency)
+            if series and series[0].date <= end:
+                universe.add((account, currency))
+        for template in self.recurring_templates:
+            for posting in template.transaction.postings:
+                if posting.units is not None and posting.units.number is not None:
+                    universe.add((posting.account, posting.units.currency))
+
+        actual_totals: dict[tuple[str, str], Decimal] = {}
+        real_end = min(end, today - datetime.timedelta(days=1))
+        if start <= real_end:
+            for txn in self._actual_transactions:
+                if txn.date < start or txn.date > real_end:
+                    continue
+                for posting in txn.postings:
+                    if posting.units is None or posting.units.number is None:
+                        continue
+                    key = (posting.account, posting.units.currency)
+                    if key not in universe:
+                        continue
+                    actual_totals[key] = actual_totals.get(key, Decimal(0)) + posting.units.number
+
+        projected_totals: dict[tuple[str, str], Decimal] = {}
+        explicit_keys: set[tuple[str, str]] = set()
+        assumed_keys: set[tuple[str, str]] = set()
+        forecast_start = max(start, today)
+        if forecast_start <= end:
+            for row in self.forecast(forecast_start, end):
+                key = (row.account, row.currency)
+                projected_totals[key] = projected_totals.get(key, Decimal(0)) + row.amount
+                if row.explicit:
+                    explicit_keys.add(key)
+                else:
+                    assumed_keys.add(key)
+
+        rows: list[ForecastReportRow] = []
+        for account, currency in sorted(universe):
+            key = (account, currency)
+            actual = actual_totals.get(key, Decimal(0))
+            projected = projected_totals.get(key, Decimal(0))
+            if key not in projected_totals:
+                status = "actual"
+            elif key in explicit_keys and key in assumed_keys:
+                status = "mixed"
+            elif key in explicit_keys:
+                status = "explicit"
+            else:
+                status = "assumed"
+            rows.append(
+                ForecastReportRow(
+                    account=account,
+                    currency=currency,
+                    actual=actual,
+                    projected=projected,
+                    status=status,
+                    total=actual + projected,
+                )
+            )
         return rows
 
     @property

@@ -171,7 +171,7 @@ nothing to the projection, same as today's clean-absence behavior.
 
 ### FORECAST-06: Cash-flow forecast report screen
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** FORECAST-05
 - **Effort:** 2h
 
@@ -186,13 +186,13 @@ distinct style or column marker) from real historical data so speculative
 figures are never mistaken for actual transactions.
 
 **Acceptance criteria:**
-- [ ] Default view projects roughly 3 months forward from today without
+- [x] Default view projects roughly 3 months forward from today without
       requiring manual date entry.
-- [ ] Projected figures are visually distinguished from actual historical
+- [x] Projected figures are visually distinguished from actual historical
       figures.
-- [ ] Bad period input shows an inline error without crashing, matching
+- [x] Bad period input shows an inline error without crashing, matching
       other report screens' existing behavior.
-- [ ] Test covering a fixture with one recurring template and one budget
+- [x] Test covering a fixture with one recurring template and one budget
       producing the expected blended projection.
 
 ---
