@@ -8,7 +8,7 @@ from rich.text import Text
 from textual.widgets import Checkbox, DataTable, Input, OptionList, Select, Static
 
 from beancount_tui.app import BeancountTUI, UndoManager
-from beancount_tui.editor import append_entry, format_entry
+from beancount_tui.editor import append_entry, format_entry, parse_transaction_text
 from beancount_tui.ledger import BudgetEntry, Ledger, transaction_amount_value
 from beancount_tui.widgets.account_input import AccountInput
 from beancount_tui.widgets.account_tree import AccountTree
@@ -23,6 +23,7 @@ from beancount_tui.widgets.document_preview import DocumentPreviewScreen
 from beancount_tui.widgets.import_form import ImportForm
 from beancount_tui.widgets.import_review import ImportReviewScreen
 from beancount_tui.widgets.postings_area import PostingsArea
+from beancount_tui.widgets.structured_postings import PostingsRow, StructuredPostingsArea
 from beancount_tui.widgets.filter_bar import FilterBar
 from beancount_tui.widgets.forecast_screen import ForecastScreen
 from beancount_tui.widgets.help_screen import HelpScreen
@@ -91,6 +92,137 @@ async def test_new_transaction_via_form(ledger_path):
     ledger = Ledger.load(ledger_path)
     assert not ledger.errors
     assert ledger.transactions[-1].payee == "Corner Cafe"
+
+
+async def test_postings_structured_raw_round_trip(ledger_path):
+    """UX-08: toggling raw -> structured -> raw preserves already-entered
+    postings, and either view can be the one that's active on save."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        raw = form.query_one("#postings", PostingsArea)
+        raw.text = "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+        await pilot.pause()
+
+        # Raw -> structured: the two simple postings become two rows.
+        await form.action_toggle_postings_view()
+        await pilot.pause()
+        assert form._structured_active
+
+        structured = form.query_one("#postings-structured", StructuredPostingsArea)
+        rows = list(structured.query(PostingsRow))
+        assert len(rows) == 2
+        assert (
+            rows[0].query_one(".posting-account", AccountInput).value
+            == "Expenses:Food:Restaurant"
+        )
+        assert rows[0].query_one(".posting-amount", Input).value == "4.50"
+        assert rows[0].query_one(".posting-currency", Input).value == "USD"
+        assert rows[1].query_one(".posting-account", AccountInput).value == "Assets:Checking"
+        assert rows[1].query_one(".posting-amount", Input).value == ""
+
+        # Edit the balancing posting's amount in structured view.
+        rows[1].query_one(".posting-amount", Input).value = "-4.50"
+        rows[1].query_one(".posting-currency", Input).value = "USD"
+
+        # Structured -> raw: the edit made in structured view carries over.
+        await form.action_toggle_postings_view()
+        await pilot.pause()
+        assert not form._structured_active
+        raw = form.query_one("#postings", PostingsArea)
+        assert "Expenses:Food:Restaurant" in raw.text
+        assert "4.50 USD" in raw.text
+        assert "Assets:Checking" in raw.text
+        assert "-4.50 USD" in raw.text
+
+        # Whichever view is active (raw, here) when the form is saved wins.
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert [p.account for p in txn.postings] == [
+        "Expenses:Food:Restaurant",
+        "Assets:Checking",
+    ]
+    assert str(txn.postings[1].units.number) == "-4.50"
+
+
+async def test_postings_structured_view_saves_directly(ledger_path):
+    """Saving while the structured view (not raw) is active still works,
+    and produces the same parsed postings as the equivalent raw text."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Corner Cafe"
+        form.query_one("#narration").value = "Coffee"
+        raw = form.query_one("#postings", PostingsArea)
+        raw.text = "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+        await pilot.pause()
+
+        await form.action_toggle_postings_view()
+        await pilot.pause()
+        assert form._structured_active
+
+        form._save()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    txn = ledger.transactions[-1]
+    assert txn.payee == "Corner Cafe"
+    assert [p.account for p in txn.postings] == [
+        "Expenses:Food:Restaurant",
+        "Assets:Checking",
+    ]
+    assert str(txn.postings[0].units.number) == "4.50"
+
+
+async def test_postings_toggle_stays_raw_for_cost_basis(ledger_path):
+    """UX-08 escape hatch: postings the structured UX can't model (cost
+    basis here) keep the raw-text view active instead of losing/corrupting
+    the syntax, and still round-trip correctly when saved via that raw
+    fallback -- verified against the real parser directly (`data.Posting`),
+    sidestepping the unrelated commodity-per-account booking constraints a
+    full ledger reload would otherwise raise for this ad hoc test ledger."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#narration").value = "Buy stock"
+        raw = form.query_one("#postings", PostingsArea)
+        raw.text = "Assets:Brokerage  10 HOOL {500.00 USD}\nAssets:Cash"
+        await pilot.pause()
+
+        await form.action_toggle_postings_view()
+        await pilot.pause()
+        # The toggle refuses to switch, leaving the raw view (and its text)
+        # untouched rather than dropping the cost-basis annotation.
+        assert not form._structured_active
+        assert form.query_one("#postings", PostingsArea).text == raw.text
+
+        text = form._assemble_text()
+
+    txn = parse_transaction_text(text)
+    assert txn.postings[0].account == "Assets:Brokerage"
+    assert str(txn.postings[0].units.number) == "10"
+    assert txn.postings[0].units.currency == "HOOL"
+    assert txn.postings[0].cost.currency == "USD"
+    assert str(txn.postings[0].cost.number_per) == "500.00"
 
 
 async def test_edit_transaction_via_form(ledger_path):

@@ -2,8 +2,10 @@ import pytest
 from beancount.core import data
 
 from beancount_tui.editor import (
+    SimplePosting,
     TransactionParseError,
     append_entry,
+    decompose_postings_text,
     delete_entry,
     entry_line_span,
     parse_directive_text,
@@ -135,3 +137,66 @@ def test_delete_last_entry_in_file(ledger_path):
     ledger.reload()
     assert not ledger.errors
     assert len(ledger.transactions) == 5
+
+
+# UX-08: `decompose_postings_text` is the shared source of truth the
+# structured postings UX uses to decide whether raw posting text can be
+# represented as rows, and to load it if so.
+
+
+def test_decompose_postings_text_simple():
+    postings = decompose_postings_text(
+        "Expenses:Food:Restaurant  4.50 USD\nAssets:Checking"
+    )
+    assert postings == [
+        SimplePosting("Expenses:Food:Restaurant", "4.50", "USD"),
+        SimplePosting("Assets:Checking"),
+    ]
+
+
+def test_decompose_postings_text_empty():
+    assert decompose_postings_text("") == []
+    assert decompose_postings_text("   \n  \n") == []
+
+
+def test_decompose_postings_text_rejects_cost_basis():
+    assert (
+        decompose_postings_text(
+            "Assets:Brokerage  10 HOOL {500.00 USD}\nAssets:Cash"
+        )
+        is None
+    )
+
+
+def test_decompose_postings_text_rejects_price_annotation():
+    assert (
+        decompose_postings_text("Assets:Cash  -25.00 USD @ 1.10 EUR\nAssets:Foreign")
+        is None
+    )
+
+
+def test_decompose_postings_text_rejects_flag():
+    assert (
+        decompose_postings_text("! Assets:Pending  5.00 USD\nAssets:Checking") is None
+    )
+
+
+def test_decompose_postings_text_rejects_metadata():
+    assert (
+        decompose_postings_text(
+            'Assets:Cash  5.00 USD\n  key: "value"\nAssets:Checking'
+        )
+        is None
+    )
+
+
+def test_decompose_postings_text_syntax_error():
+    assert decompose_postings_text("not an account or amount") is None
+
+
+def test_simple_posting_to_line():
+    assert SimplePosting("Assets:Checking").to_line() == "Assets:Checking"
+    assert (
+        SimplePosting("Expenses:Food", "4.50", "USD").to_line()
+        == "Expenses:Food  4.50 USD"
+    )

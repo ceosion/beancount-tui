@@ -179,7 +179,7 @@ suggestion list (rather than forced full-line completion) fits better.
 
 ### UX-08: Structured Postings editor with raw-text toggle
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 3h
 
@@ -198,16 +198,16 @@ one whose content is used — both must serialize to/parse from the same
 Beancount posting text so switching mid-edit doesn't lose entered data.
 
 **Acceptance criteria:**
-- [ ] A toggle switches between the structured row-based postings UX and
+- [x] A toggle switches between the structured row-based postings UX and
       the existing raw-text `PostingsArea`, preserving already-entered
       postings across the switch.
-- [ ] Structured UX supports add/remove posting rows, account completion
+- [x] Structured UX supports add/remove posting rows, account completion
       (via `AccountInput`), and amount/currency entry.
-- [ ] Postings entered in either UX produce identical parsed
+- [x] Postings entered in either UX produce identical parsed
       `data.Posting` results for equivalent input.
-- [ ] Postings using syntax the structured UX doesn't model (e.g. cost
+- [x] Postings using syntax the structured UX doesn't model (e.g. cost
       basis) round-trip correctly when authored/viewed via the raw-text
       fallback.
-- [ ] Test covering structured-to-raw and raw-to-structured round-trips for
+- [x] Test covering structured-to-raw and raw-to-structured round-trips for
       a simple two-posting transaction.
 
