@@ -6,6 +6,7 @@ import argparse
 import datetime
 import sys
 from collections import deque
+from collections.abc import Callable
 from pathlib import Path
 
 from beancount.core import data, getters, realization
@@ -17,6 +18,7 @@ from beancount_tui.editor import (
     append_entry,
     delete_entry,
     format_entry,
+    parse_transaction_text,
     replace_entry,
     replace_flag,
 )
@@ -417,14 +419,100 @@ class BeancountTUI(App):
             self.refresh_views()
             self.notify("Ledger changed on disk; reloaded.")
 
+    def _save_transaction(
+        self,
+        text: str,
+        *,
+        file_for_writes: str | Path,
+        commit: Callable[[], None],
+        reopen: Callable[[], None],
+    ) -> None:
+        """Shared save gate for the new/edit/duplicate transaction flows
+        (`EDIT-05`): before a transaction is actually written, diff its
+        posting accounts against ``self.ledger.accounts`` and offer to
+        create matching ``open`` directives for any that aren't already
+        declared, rather than silently saving a transaction Beancount would
+        flag as an error on next load.
+
+        ``text`` is assumed already validated by `TransactionForm` (a single
+        parseable transaction). If every posting account is already
+        declared, this is a no-op gate: `file_for_writes` is snapshotted for
+        undo and `commit` (the caller's actual `append_entry`/
+        `replace_entry`) runs immediately.
+
+        Otherwise a `ConfirmDialog` lists the missing accounts and the
+        ``open`` directive(s) that would be created for them — synthesized
+        from `LANG-01`'s own `_directive_template`, dated today or the
+        transaction's own date if that's earlier (so the open always
+        predates or matches it). Accepting appends those opens to
+        `file_for_writes` and then runs `commit`; declining runs `reopen`
+        instead (expected to hand the user's entered content back to them)
+        and leaves the ledger untouched.
+
+        Only one `_snapshot_for_undo` is taken for the whole operation,
+        covering the open(s) and the transaction together, so a single undo
+        reverts both — the same "one user action, one undo step" convention
+        `action_pad_and_verify` already follows for its own two-directive
+        write.
+        """
+        txn = parse_transaction_text(text)
+        missing = sorted({posting.account for posting in txn.postings} - set(self.ledger.accounts))
+        if not missing:
+            self._snapshot_for_undo(file_for_writes)
+            commit()
+            return
+
+        open_date = min(datetime.date.today(), txn.date)
+        open_lines = [
+            _directive_template("open", open_date.isoformat()).replace("Assets:FIXME", account)
+            for account in missing
+        ]
+        plural = "s" if len(missing) > 1 else ""
+
+        def on_confirm(confirmed: bool | None) -> None:
+            if not confirmed:
+                reopen()
+                return
+            self._snapshot_for_undo(file_for_writes)
+            for open_line in open_lines:
+                append_entry(file_for_writes, open_line)
+            commit()
+
+        self.push_screen(
+            ConfirmDialog(
+                f"Account{plural} not yet declared:\n"
+                + "\n".join(open_lines)
+                + "\n\nCreate the above and save the transaction?",
+                confirm_label="Create & save",
+            ),
+            on_confirm,
+        )
+
     def action_new_transaction(self) -> None:
         def on_result(result: TransactionFormResult | None) -> None:
             if result is None:
                 return
             target = result.filename or self.ledger.path
-            self._snapshot_for_undo(target)
-            append_entry(target, result.text)
-            self.action_reload()
+
+            def commit() -> None:
+                append_entry(target, result.text)
+                self.action_reload()
+
+            def reopen() -> None:
+                self.push_screen(
+                    _reopen_transaction_form(
+                        result.text,
+                        title="New transaction",
+                        files=self.ledger.files,
+                        accounts=self.ledger.accounts,
+                        selected_file=str(target),
+                    ),
+                    on_result,
+                )
+
+            self._save_transaction(
+                result.text, file_for_writes=target, commit=commit, reopen=reopen
+            )
 
         self.push_screen(
             TransactionForm(files=self.ledger.files, accounts=self.ledger.accounts), on_result
@@ -625,9 +713,26 @@ class BeancountTUI(App):
             def on_form_result(result: TransactionFormResult | None) -> None:
                 if result is None:
                     return
-                self._snapshot_for_undo(entry.meta["filename"])
-                replace_entry(entry, result.text)
-                self.action_reload()
+                target = entry.meta["filename"]
+
+                def commit() -> None:
+                    replace_entry(entry, result.text)
+                    self.action_reload()
+
+                def reopen() -> None:
+                    self.push_screen(
+                        _reopen_transaction_form(
+                            result.text,
+                            title="Edit transaction",
+                            files=None,
+                            accounts=self.ledger.accounts,
+                        ),
+                        on_form_result,
+                    )
+
+                self._save_transaction(
+                    result.text, file_for_writes=target, commit=commit, reopen=reopen
+                )
 
             # If this transaction is itself a FORECAST-01 recurring template,
             # pre-fill the form's guided recurring fields from its already
@@ -664,9 +769,26 @@ class BeancountTUI(App):
             if result is None:
                 return
             target = result.filename or self.ledger.path
-            self._snapshot_for_undo(target)
-            append_entry(target, result.text)
-            self.action_reload()
+
+            def commit() -> None:
+                append_entry(target, result.text)
+                self.action_reload()
+
+            def reopen() -> None:
+                self.push_screen(
+                    _reopen_transaction_form(
+                        result.text,
+                        title="Duplicate transaction",
+                        files=self.ledger.files,
+                        accounts=self.ledger.accounts,
+                        selected_file=str(target),
+                    ),
+                    on_result,
+                )
+
+            self._save_transaction(
+                result.text, file_for_writes=target, commit=commit, reopen=reopen
+            )
 
         self.push_screen(
             _duplicate_form(entry, self.ledger.files, self.ledger.accounts), on_result
@@ -797,6 +919,46 @@ def _duplicate_form(
         title="Duplicate transaction",
         files=files,
         accounts=accounts,
+    )
+
+
+def _reopen_transaction_form(
+    text: str,
+    *,
+    title: str,
+    files: list[Path] | None,
+    accounts: list[str],
+    selected_file: str | None = None,
+) -> TransactionForm:
+    """Rebuild a `TransactionForm` from already-entered `text` (`EDIT-05`):
+    used to hand the user's content back to them when they decline
+    `BeancountTUI._save_transaction`'s missing-account prompt, rather than
+    just discarding it along with the rest of the form.
+
+    `text` is guaranteed parseable here — it already passed
+    `TransactionForm`'s own validation before the account check ran — so
+    this only re-derives display fields from the parsed `Transaction`,
+    reusing the same `_tags_links_text`/`_postings_text` helpers `_edit_form`
+    and `_duplicate_form` already build on.
+
+    Note this does not reconstruct the guided recurring-template
+    checkbox/interval state: a ``#recurring`` tag or ``recurring-freq``/
+    ``recurring-until`` metadata already present in `text` simply comes
+    back as plain tags/postings-body text (toggle unchecked), which still
+    round-trips identically on a second save.
+    """
+    txn = parse_transaction_text(text)
+    return TransactionForm(
+        date=txn.date.isoformat(),
+        flag=txn.flag or "*",
+        payee=txn.payee or "",
+        narration=txn.narration or "",
+        tags_links=_tags_links_text(txn),
+        postings_text=_postings_text(txn),
+        title=title,
+        files=files,
+        accounts=accounts,
+        selected_file=selected_file,
     )
 
 

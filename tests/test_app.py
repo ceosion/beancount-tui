@@ -783,6 +783,146 @@ async def test_duplicate_requires_transaction(ledger_path):
         assert not isinstance(app.screen, TransactionForm)
 
 
+async def test_new_transaction_with_undeclared_account_prompts_to_open(ledger_path):
+    """EDIT-05: a posting against an account with no matching `open` prompts
+    to create one, and accepting appends both the `open` and the
+    transaction."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Ye Olde Shoppe"
+        form.query_one("#narration").value = "New gadget"
+        form.query_one("#postings").text = (
+            "Expenses:Shopping:Gadgets  25.00 USD\nAssets:Checking"
+        )
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 7
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert "Expenses:Shopping:Gadgets" in ledger.accounts
+    opens = [
+        e
+        for e in ledger.entries
+        if isinstance(e, data.Open) and e.account == "Expenses:Shopping:Gadgets"
+    ]
+    assert len(opens) == 1
+    assert opens[0].date == datetime.date.today()
+    txn = next(t for t in ledger.transactions if t.narration == "New gadget")
+    assert txn.postings[0].account == "Expenses:Shopping:Gadgets"
+
+
+async def test_new_transaction_missing_account_declined_preserves_form(ledger_path):
+    """EDIT-05: declining the missing-account prompt rejects the save
+    entirely -- nothing is appended, and the entered content comes back in
+    a fresh form rather than being lost."""
+    original = ledger_path.read_text()
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("n")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#payee").value = "Ye Olde Shoppe"
+        form.query_one("#narration").value = "New gadget"
+        form.query_one("#postings").text = (
+            "Expenses:Shopping:Gadgets  25.00 USD\nAssets:Checking"
+        )
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+
+        dialog.query_one("#cancel").press()
+        await pilot.pause()
+
+        reopened = app.screen
+        assert isinstance(reopened, TransactionForm)
+        assert reopened.query_one("#payee").value == "Ye Olde Shoppe"
+        assert reopened.query_one("#narration").value == "New gadget"
+        assert "Expenses:Shopping:Gadgets" in reopened.query_one("#postings").text
+
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 6
+
+    assert ledger_path.read_text() == original
+
+
+async def test_edit_transaction_with_undeclared_account_prompts_to_open(ledger_path):
+    """EDIT-05 applies to the edit flow too, not just new transactions."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        app.query_one(TransactionTable).move_cursor(row=0)
+        await pilot.press("e")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#postings").text = (
+            "Assets:Checking  2500.00 USD\nEquity:NewOpeningBalances"
+        )
+        form._save()
+        await pilot.pause()
+
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert "Equity:NewOpeningBalances" in ledger.accounts
+
+
+async def test_duplicate_transaction_with_undeclared_account_prompts_to_open(ledger_path):
+    """EDIT-05 applies to the duplicate flow too, not just new transactions."""
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        rent_row = next(i for i, e in enumerate(table.shown) if e.payee == "Landlord")
+        table.move_cursor(row=rent_row)
+        await pilot.press("c")
+        await pilot.pause()
+        form = app.screen
+        assert isinstance(form, TransactionForm)
+
+        form.query_one("#postings").text = (
+            "Expenses:Rent:NewLease  1450.00 USD\nAssets:Checking"
+        )
+        form._save()
+        await pilot.pause()
+
+        dialog = app.screen
+        assert isinstance(dialog, ConfirmDialog)
+        dialog.query_one("#confirm").press()
+        await pilot.pause()
+
+        assert table.row_count == 7
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    assert "Expenses:Rent:NewLease" in ledger.accounts
+
+
 async def test_toggle_directives(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:
