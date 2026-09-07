@@ -329,7 +329,7 @@ commodity from those that actually have price history.
 
 ### RPT-11: Document preview modal
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -345,12 +345,12 @@ is missing (already flagged with `!`) shows a "file not found" message
 instead of attempting to read it.
 
 **Acceptance criteria:**
-- [ ] Selecting a `Document` row and triggering the preview action opens a
+- [x] Selecting a `Document` row and triggering the preview action opens a
       modal showing the file's text contents (for text-like files).
-- [ ] Binary/unsupported files show a graceful fallback message with basic
+- [x] Binary/unsupported files show a graceful fallback message with basic
       file metadata instead of raw bytes or a crash.
-- [ ] A `Document` row whose file is missing shows a "file not found"
+- [x] A `Document` row whose file is missing shows a "file not found"
       message instead of attempting to read it.
-- [ ] Test covering: text file preview content, binary fallback message,
+- [x] Test covering: text file preview content, binary fallback message,
       and missing-file message, using fixture files under a temp ledger
       directory.
