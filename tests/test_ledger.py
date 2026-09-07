@@ -509,6 +509,28 @@ def test_converted_total_reports_no_price_available(priced_ledger_path):
     assert unpriced == ["XYZ"]
 
 
+def test_price_history_returns_entries_in_date_order(priced_ledger_path):
+    ledger = Ledger.load(priced_ledger_path)
+    assert not ledger.errors
+    assert ledger.price_history("AAPL") == [
+        (datetime.date(2026, 1, 2), Decimal("150.00"), "USD"),
+        (datetime.date(2026, 1, 3), Decimal("175.32"), "USD"),
+    ]
+
+
+def test_price_history_unknown_commodity_is_empty(priced_ledger_path):
+    ledger = Ledger.load(priced_ledger_path)
+    # XYZ is held (in the "Buy crypto" transaction) but never priced.
+    assert ledger.price_history("XYZ") == []
+
+
+def test_price_commodities_excludes_unpriced_commodities(priced_ledger_path):
+    ledger = Ledger.load(priced_ledger_path)
+    # AAPL has Price directives; USD (the operating currency) and XYZ
+    # (held but never priced) don't and are excluded.
+    assert ledger.price_commodities == ["AAPL"]
+
+
 def test_converted_total_no_operating_currency_configured(ledger_path):
     # examples/example.beancount configures "USD" as the operating currency;
     # temporarily clear it to exercise the "not configured" branch.

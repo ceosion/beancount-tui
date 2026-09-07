@@ -301,7 +301,7 @@ an additional mode, not a replacement.
 
 ### RPT-10: Commodity price history view
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-02
 - **Effort:** 1.5h
 
@@ -318,11 +318,11 @@ for a TUI; a table is the pragmatic equivalent here. Let the user pick a
 commodity from those that actually have price history.
 
 **Acceptance criteria:**
-- [ ] New method returns a commodity's price entries in date order.
-- [ ] New screen/binding lists commodities with price history and shows
+- [x] New method returns a commodity's price entries in date order.
+- [x] New screen/binding lists commodities with price history and shows
       the selected one's full history as a table.
-- [ ] Commodities with no `Price` directives are excluded from the picker.
-- [ ] Test covering price-history output against a known ledger with
+- [x] Commodities with no `Price` directives are excluded from the picker.
+- [x] Test covering price-history output against a known ledger with
       multiple `Price` entries for one commodity.
 
 ---

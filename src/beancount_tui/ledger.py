@@ -1579,6 +1579,46 @@ class Ledger:
             return None, unpriced
         return total, unpriced
 
+    @property
+    def price_commodities(self) -> list[str]:
+        """Commodities with at least one ``Price`` directive, sorted.
+
+        Every other consumer of ``Price`` directives (``holdings``,
+        ``converted_total``) only ever wants a single latest/as-of rate via
+        ``prices.build_price_map``; this is the first place that needs the
+        raw set of commodities that have *any* price history at all, to
+        drive the price-history screen's commodity picker (RPT-10) so it
+        only offers commodities with something to show.
+        """
+        return sorted(
+            {
+                entry.currency
+                for entry in self._actual_entries
+                if isinstance(entry, data.Price)
+            }
+        )
+
+    def price_history(self, commodity: str) -> list[tuple[datetime.date, Decimal, str]]:
+        """Every ``Price`` directive for ``commodity``, in date order (RPT-10).
+
+        Returns ``(date, rate, quote_currency)`` tuples — unlike
+        ``holdings``/``converted_total``, which only ever need
+        ``prices.build_price_map``'s single latest-or-as-of rate, this
+        exposes a commodity's full price history over time, the way Fava's
+        price chart does. A chart itself is out of scope here (Textual has
+        no native charting widget, and a plotting dependency would be
+        disproportionate for a TUI), so this is consumed as a plain
+        date-ordered table instead.
+        """
+        return sorted(
+            (
+                (entry.date, entry.amount.number, entry.amount.currency)
+                for entry in self._actual_entries
+                if isinstance(entry, data.Price) and entry.currency == commodity
+            ),
+            key=lambda row: row[0],
+        )
+
 
 def filter_transactions(
     transactions: list[data.Directive],
