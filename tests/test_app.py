@@ -9,9 +9,11 @@ from textual.widgets import Checkbox, DataTable, Input, OptionList, Select, Stat
 
 from beancount_tui.app import BeancountTUI, UndoManager
 from beancount_tui.editor import append_entry, format_entry
-from beancount_tui.ledger import Ledger, transaction_amount_value
+from beancount_tui.ledger import BudgetEntry, Ledger, transaction_amount_value
+from beancount_tui.widgets.account_input import AccountInput
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
+from beancount_tui.widgets.budget_form import BudgetForm
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
@@ -533,8 +535,8 @@ async def test_add_directive_type_picker_lists_types(ledger_path):
         option_list = picker.query_one(OptionList)
         ids = {option_list.get_option_at_index(i).id for i in range(option_list.option_count)}
         assert ids == {
-            "open", "close", "balance", "pad", "note", "price", "event", "custom", "query",
-            "document", "commodity",
+            "open", "close", "balance", "pad", "note", "price", "event", "custom", "budget",
+            "query", "document", "commodity",
         }
 
         await pilot.press("escape")
@@ -1004,6 +1006,113 @@ async def test_add_custom_directive(ledger_path):
         and str(c.values[1].value) == "500.00 USD"
         for c in customs
     )
+
+
+async def test_add_budget_directive_opens_structured_form(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "budget")
+
+        form = app.screen
+        assert isinstance(form, BudgetForm)
+        # Interval select is constrained to exactly Fava's five accepted
+        # values (long form, matching `ledger.BudgetEntry.interval`).
+        interval = form.query_one("#interval", Select)
+        assert [value for _, value in interval._options] == [
+            "daily", "weekly", "monthly", "quarterly", "yearly",
+        ]
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert not isinstance(app.screen, BudgetForm)
+
+
+async def test_budget_form_account_tab_completion(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "budget")
+
+        form = app.screen
+        assert isinstance(form, BudgetForm)
+        account = form.query_one("#account", AccountInput)
+        account.focus()
+
+        # Ambiguous prefix extends to the longest common prefix, same as
+        # the postings editor's completion (see `test_account_completion_
+        # in_postings`).
+        account.value = "Exp"
+        account.cursor_position = 3
+        await pilot.press("tab")
+        assert account.value == "Expenses:"
+
+        # A unique match completes fully.
+        account.value = "Expenses:R"
+        account.cursor_position = 10
+        await pilot.press("tab")
+        assert account.value == "Expenses:Rent"
+
+
+async def test_budget_form_amount_and_currency_reject_non_numeric_input(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "budget")
+
+        form = app.screen
+        assert isinstance(form, BudgetForm)
+
+        amount = form.query_one("#amount", Input)
+        amount.focus()
+        await pilot.press("1", "2", ".", "5", "a", "!", "0")
+        assert amount.value == "12.50"
+
+        currency = form.query_one("#currency", Input)
+        currency.value = ""
+        currency.focus()
+        await pilot.press("U", "S", "D", "5", "$")
+        assert currency.value == "USD"
+
+
+async def test_add_budget_directive_via_structured_form(ledger_path):
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("a")
+        await pilot.pause()
+        await _pick_directive_type(pilot, "budget")
+
+        form = app.screen
+        assert isinstance(form, BudgetForm)
+
+        form.query_one("#date", Input).value = "2026-09-06"
+        form.query_one("#account", AccountInput).value = "Expenses:Rent"
+        form.query_one("#interval", Select).value = "monthly"
+        form.query_one("#amount", Input).value = "1500.00"
+        form.query_one("#currency", Input).value = "USD"
+        await pilot.pause()
+        form._save()
+        await pilot.pause()
+
+        assert not isinstance(app.screen, BudgetForm)
+
+    ledger = Ledger.load(ledger_path)
+    assert not ledger.errors
+    budgets = [
+        b for b in ledger.budgets
+        if b.account == "Expenses:Rent" and b.date == datetime.date(2026, 9, 6)
+    ]
+    assert len(budgets) == 1
+    budget = budgets[0]
+    assert isinstance(budget, BudgetEntry)
+    assert budget.interval == "monthly"
+    assert str(budget.amount.number) == "1500.00"
+    assert budget.amount.currency == "USD"
 
 
 async def test_query_directive_display(ledger_path):

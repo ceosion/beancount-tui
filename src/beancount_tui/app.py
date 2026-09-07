@@ -19,6 +19,7 @@ from beancount_tui.ledger import Ledger, filter_transactions
 from beancount_tui.widgets.account_tree import AccountTree
 from beancount_tui.widgets.balance_sheet import BalanceSheetScreen
 from beancount_tui.widgets.beangulp_import_form import BeangulpImportForm
+from beancount_tui.widgets.budget_form import BudgetForm
 from beancount_tui.widgets.confirm_dialog import ConfirmDialog
 from beancount_tui.widgets.directive_form import DirectiveForm, DirectiveFormResult
 from beancount_tui.widgets.directive_type_picker import DirectiveTypePicker
@@ -413,19 +414,28 @@ class BeancountTUI(App):
         )
 
     def action_add_directive(self) -> None:
+        def on_form_result(result: DirectiveFormResult | None) -> None:
+            if result is None:
+                return
+            target = result.filename or self.ledger.path
+            self._snapshot_for_undo(target)
+            append_entry(target, result.text)
+            self.action_reload()
+
         def on_type_chosen(keyword: str | None) -> None:
             if keyword is None:
                 return
+            if keyword == "budget":
+                # Guided structured-field form (BUDGET-05) instead of the
+                # generic raw-text template, specifically for budget
+                # entries; every other keyword (including plain "custom")
+                # keeps using the generic DirectiveForm flow unchanged.
+                self.push_screen(
+                    BudgetForm(files=self.ledger.files, accounts=self.ledger.accounts),
+                    on_form_result,
+                )
+                return
             template = _directive_template(keyword, datetime.date.today().isoformat())
-
-            def on_form_result(result: DirectiveFormResult | None) -> None:
-                if result is None:
-                    return
-                target = result.filename or self.ledger.path
-                self._snapshot_for_undo(target)
-                append_entry(target, result.text)
-                self.action_reload()
-
             self.push_screen(
                 DirectiveForm(
                     template, title=f"New {keyword} directive", files=self.ledger.files
