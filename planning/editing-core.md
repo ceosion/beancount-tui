@@ -97,3 +97,41 @@ single action instead of two manual directive entries.
 - [x] Test covering the generated pad+balance pair against a reconciliation
       scenario.
 
+---
+
+### EDIT-05: Offer to create missing accounts on transaction save
+
+- **Status:** todo
+- **Depends on:** LANG-01
+- **Effort:** 1.5h
+
+**Description:** `action_new_transaction`'s `on_result` (and the equivalent
+edit/duplicate paths) currently calls `append_entry(target, result.text)`
+unconditionally — posting accounts are free text (`AccountInput`/
+`PostingsArea` only *suggest* from `ledger.accounts`; nothing stops a typo
+or a genuinely new account from being saved verbatim), so a transaction
+referencing an undeclared account is silently accepted. This is a
+deliberate behavior change: before saving, diff the postings' accounts
+against `self.ledger.accounts`; for any not already declared (no matching
+`open`), prompt the user to create `open` directives for them (dated
+today, or the transaction's own date if earlier — reuse `LANG-01`'s
+add-directive infrastructure to synthesize and append the `open` text
+alongside the transaction). If the user declines, reject the save entirely
+— return to the form with the entered text intact rather than appending a
+transaction that references an account Beancount would otherwise flag as
+an error on next load. Applies to new, edited, and duplicated transactions
+alike, since all three go through the same undeclared-account risk.
+
+**Acceptance criteria:**
+- [ ] Saving a transaction whose postings are all against already-declared
+      accounts is unaffected (no prompt).
+- [ ] Saving a transaction referencing at least one undeclared account
+      prompts to create matching `open` directives; accepting appends both
+      the new `open`(s) and the transaction.
+- [ ] Declining the prompt rejects the save — the transaction is not
+      appended, and the form's entered content is preserved so the user
+      doesn't lose their input.
+- [ ] Applies uniformly to the new-transaction, edit, and duplicate flows.
+- [ ] Test covering both the accept path (open + transaction both appended,
+      ledger still validates) and the decline path (nothing appended).
+

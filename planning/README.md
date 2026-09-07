@@ -78,5 +78,5 @@ Not tracked as tasks — this is what v0.1 already shipped, per git history:
 
 ## Total scope
 
-46 tasks across 8 areas: 11 `LANG`, 6 `RPT`, 4 `EDIT`, 4 `IMP`, 4 `UX`, 4
+52 tasks across 8 areas: 11 `LANG`, 7 `RPT`, 5 `EDIT`, 4 `IMP`, 8 `UX`, 4
 `TOOL`, 6 `BUDGET`, 7 `FORECAST`.
