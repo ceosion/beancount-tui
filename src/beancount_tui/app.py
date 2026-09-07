@@ -390,6 +390,9 @@ class BeancountTUI(App):
             ImportReviewScreen(
                 candidates,
                 accounts=self.ledger.accounts,
+                payees=self.ledger.payees,
+                narrations=self.ledger.narrations,
+                tags=self.ledger.tags,
                 existing_transactions=self.ledger.transactions_for_account(None),
             ),
             on_review,
@@ -557,6 +560,9 @@ class BeancountTUI(App):
                         title="New transaction",
                         files=self.ledger.files,
                         accounts=self.ledger.accounts,
+                        payees=self.ledger.payees,
+                        narrations=self.ledger.narrations,
+                        tags=self.ledger.tags,
                         selected_file=str(target),
                     ),
                     on_result,
@@ -567,7 +573,14 @@ class BeancountTUI(App):
             )
 
         self.push_screen(
-            TransactionForm(files=self.ledger.files, accounts=self.ledger.accounts), on_result
+            TransactionForm(
+                files=self.ledger.files,
+                accounts=self.ledger.accounts,
+                payees=self.ledger.payees,
+                narrations=self.ledger.narrations,
+                tags=self.ledger.tags,
+            ),
+            on_result,
         )
 
     def action_add_directive(self) -> None:
@@ -786,6 +799,9 @@ class BeancountTUI(App):
                             title="Edit transaction",
                             files=None,
                             accounts=self.ledger.accounts,
+                            payees=self.ledger.payees,
+                            narrations=self.ledger.narrations,
+                            tags=self.ledger.tags,
                         ),
                         on_form_result,
                     )
@@ -802,7 +818,15 @@ class BeancountTUI(App):
                 (t for t in self.ledger.recurring_templates if t.transaction is entry), None
             )
             self.push_screen(
-                _edit_form(entry, self.ledger.accounts, recurring_template), on_form_result
+                _edit_form(
+                    entry,
+                    self.ledger.accounts,
+                    recurring_template,
+                    payees=self.ledger.payees,
+                    narrations=self.ledger.narrations,
+                    tags=self.ledger.tags,
+                ),
+                on_form_result,
             )
             return
 
@@ -841,6 +865,9 @@ class BeancountTUI(App):
                         title="Duplicate transaction",
                         files=self.ledger.files,
                         accounts=self.ledger.accounts,
+                        payees=self.ledger.payees,
+                        narrations=self.ledger.narrations,
+                        tags=self.ledger.tags,
                         selected_file=str(target),
                     ),
                     on_result,
@@ -851,7 +878,15 @@ class BeancountTUI(App):
             )
 
         self.push_screen(
-            _duplicate_form(entry, self.ledger.files, self.ledger.accounts), on_result
+            _duplicate_form(
+                entry,
+                self.ledger.files,
+                self.ledger.accounts,
+                payees=self.ledger.payees,
+                narrations=self.ledger.narrations,
+                tags=self.ledger.tags,
+            ),
+            on_result,
         )
 
     def action_delete_transaction(self) -> None:
@@ -948,6 +983,10 @@ def _edit_form(
     txn: data.Transaction,
     accounts: list[str],
     recurring_template: RecurringTemplate | None = None,
+    *,
+    payees: list[str] | None = None,
+    narrations: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> TransactionForm:
     """Build a form pre-filled from an existing transaction.
 
@@ -970,6 +1009,9 @@ def _edit_form(
         postings_text=_postings_text(txn, exclude_meta_keys=exclude_meta),
         title="Edit transaction",
         accounts=accounts,
+        payees=payees,
+        narrations=narrations,
+        tags=tags,
         recurring=recurring_template is not None,
         recurring_interval=recurring_template.interval if recurring_template else "monthly",
         recurring_until=(
@@ -981,7 +1023,13 @@ def _edit_form(
 
 
 def _duplicate_form(
-    txn: data.Transaction, files: list[Path], accounts: list[str]
+    txn: data.Transaction,
+    files: list[Path],
+    accounts: list[str],
+    *,
+    payees: list[str] | None = None,
+    narrations: list[str] | None = None,
+    tags: list[str] | None = None,
 ) -> TransactionForm:
     """Build a form for a copy of ``txn``, dated today and appended on save."""
     return TransactionForm(
@@ -993,6 +1041,9 @@ def _duplicate_form(
         title="Duplicate transaction",
         files=files,
         accounts=accounts,
+        payees=payees,
+        narrations=narrations,
+        tags=tags,
     )
 
 
@@ -1002,6 +1053,9 @@ def _reopen_transaction_form(
     title: str,
     files: list[Path] | None,
     accounts: list[str],
+    payees: list[str] | None = None,
+    narrations: list[str] | None = None,
+    tags: list[str] | None = None,
     selected_file: str | None = None,
 ) -> TransactionForm:
     """Rebuild a `TransactionForm` from already-entered `text` (`EDIT-05`):
@@ -1032,6 +1086,9 @@ def _reopen_transaction_form(
         title=title,
         files=files,
         accounts=accounts,
+        payees=payees,
+        narrations=narrations,
+        tags=tags,
         selected_file=selected_file,
     )
 

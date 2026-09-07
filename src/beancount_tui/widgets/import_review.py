@@ -184,10 +184,18 @@ class ImportReviewScreen(ModalScreen[list[str] | None]):
         candidates: list[ImportCandidate],
         *,
         accounts: list[str] | None = None,
+        payees: list[str] | None = None,
+        narrations: list[str] | None = None,
+        tags: list[str] | None = None,
         existing_transactions: list[data.Transaction] | None = None,
     ) -> None:
         super().__init__()
         self._accounts = accounts or []
+        # UX-07: forwarded to each row's edit `TransactionForm` (see
+        # `_open_edit`) the same way `_accounts` already is.
+        self._payees = payees or []
+        self._narrations = narrations or []
+        self._tags = tags or []
         self._rows: list[_Row] = [
             _row_from_candidate(c, existing_transactions) for c in candidates
         ]
@@ -255,6 +263,9 @@ class ImportReviewScreen(ModalScreen[list[str] | None]):
                 postings_text=row.postings_text,
                 title=f"Edit import row {row.candidate.row_number}",
                 accounts=self._accounts,
+                payees=self._payees,
+                narrations=self._narrations,
+                tags=self._tags,
             ),
             on_result,
         )

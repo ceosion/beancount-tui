@@ -48,3 +48,38 @@ def multi_ledger_path(tmp_path: Path) -> Path:
         encoding="utf-8",
     )
     return main
+
+
+@pytest.fixture
+def completions_ledger_path(tmp_path: Path) -> Path:
+    """A throwaway ledger with known, repeated payees/narrations/tags
+    (UX-07's Payee/Narration/Tags completion), plus a tag that only ever
+    appears on a `note` directive -- Beancount's data model carries a
+    `tags` field on `Note` and `Document` too, not just `Transaction`, so
+    `Ledger.tags` (and `TagsInput`'s completion candidates) must pick that
+    up as well as tags actually used on a transaction.
+    """
+    path = tmp_path / "ledger.beancount"
+    path.write_text(
+        'option "title" "Completions Ledger"\n'
+        'option "operating_currency" "USD"\n'
+        "\n"
+        "2026-01-01 open Assets:Checking          USD\n"
+        "2026-01-01 open Expenses:Food:Restaurant USD\n"
+        "\n"
+        '2026-01-05 * "Landlord" "January rent" #housing\n'
+        "  Expenses:Food:Restaurant  10.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-01-06 * "Landlord" "February rent" #housing\n'
+        "  Expenses:Food:Restaurant  10.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-01-07 * "Lively Bistro" "Dinner with friends" #leisure\n'
+        "  Expenses:Food:Restaurant  20.00 USD\n"
+        "  Assets:Checking\n"
+        "\n"
+        '2026-01-08 note Assets:Checking "Reconciled" #ledger-only-tag\n',
+        encoding="utf-8",
+    )
+    return path

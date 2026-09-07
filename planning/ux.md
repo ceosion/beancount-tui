@@ -148,7 +148,7 @@ replacement that forces every date through the picker.
 
 ### UX-07: Intelligent completion suggestions for Payee, Narration, and Tags
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -164,15 +164,15 @@ logic; narration is free text so a looser "recently used, prefix-matched"
 suggestion list (rather than forced full-line completion) fits better.
 
 **Acceptance criteria:**
-- [ ] Payee field suggests/completes from payees already used in the
+- [x] Payee field suggests/completes from payees already used in the
       ledger.
-- [ ] Tags field suggests/completes from tags already used in the ledger
+- [x] Tags field suggests/completes from tags already used in the ledger
       (including tags used only on non-transaction directives, if any).
-- [ ] Narration field offers prefix-matched suggestions from prior
+- [x] Narration field offers prefix-matched suggestions from prior
       narrations without forcing a single completion.
-- [ ] Typing a value with no match is unaffected (falls through to normal
+- [x] Typing a value with no match is unaffected (falls through to normal
       input behavior, mirroring `AccountInput`'s no-match fallback).
-- [ ] Test covering suggestion/completion behavior for each of the three
+- [x] Test covering suggestion/completion behavior for each of the three
       fields against a ledger with known prior values.
 
 ---
