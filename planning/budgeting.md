@@ -16,7 +16,7 @@ form.
 
 ### BUDGET-01: Budget directive parsing
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** LANG-06
 - **Effort:** 1.5h
 
@@ -31,13 +31,13 @@ way other malformed directives are surfaced (existing error panel), rather
 than crashing. This is pure parsing — no proration math yet.
 
 **Acceptance criteria:**
-- [ ] `Ledger.budgets` (or equivalent) returns parsed `BudgetEntry` objects
+- [x] `Ledger.budgets` (or equivalent) returns parsed `BudgetEntry` objects
       for every `custom "budget"` entry in the ledger.
-- [ ] Both long-form and short-form interval strings parse to the same
+- [x] Both long-form and short-form interval strings parse to the same
       canonical interval.
-- [ ] An unrecognized interval string surfaces as a validation error rather
+- [x] An unrecognized interval string surfaces as a validation error rather
       than crashing or being silently dropped.
-- [ ] Test covering parsing a handful of budget directives across all five
+- [x] Test covering parsing a handful of budget directives across all five
       intervals plus one invalid-interval case.
 
 ---
