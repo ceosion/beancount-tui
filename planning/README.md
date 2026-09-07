@@ -25,6 +25,12 @@ satisfied; flip `Status` to `done` only once all of them are checked.
 `Depends on` lists task IDs (or "none"). A task shouldn't be started until
 everything it depends on is `done`, unless its notes say otherwise.
 
+## Execution phases
+
+For a UAT-driven grouping of all remaining `todo` work into 5 phases (each
+ending at a point suited to manual review before the next begins), see
+[PHASES.md](PHASES.md).
+
 ## Task areas
 
 | File | Prefix | Covers |
