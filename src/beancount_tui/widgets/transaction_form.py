@@ -18,6 +18,7 @@ from textual.widgets import Button, Checkbox, Input, Label, Select, Static, Text
 
 from beancount_tui.editor import TransactionParseError, parse_transaction_text
 from beancount_tui.widgets.budget_form import INTERVALS
+from beancount_tui.widgets.date_input import DateInput
 from beancount_tui.widgets.postings_area import PostingsArea
 
 
@@ -113,7 +114,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
         with Vertical():
             yield Label(f"[b]{self._title}[/b]")
             yield Label("Date", classes="field-label")
-            yield Input(value=self._date, id="date", placeholder="YYYY-MM-DD")
+            yield DateInput(value=self._date, id="date", placeholder="YYYY-MM-DD")
             yield Label("Flag (* = cleared, ! = pending)", classes="field-label")
             yield Input(value=self._flag, id="flag")
             yield Label("Payee", classes="field-label")
@@ -132,7 +133,7 @@ class TransactionForm(ModalScreen[TransactionFormResult | None]):
             until_label = Label(
                 "Repeat until (optional)", classes="field-label", id="recurring-until-label"
             )
-            until_input = Input(
+            until_input = DateInput(
                 value=self._recurring_until,
                 id="recurring-until",
                 placeholder="YYYY-MM-DD (optional)",

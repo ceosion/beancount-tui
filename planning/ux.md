@@ -122,7 +122,7 @@ change is undoable like any other edit.
 
 ### UX-06: Enhanced date picker UX
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 2h
 
@@ -136,13 +136,27 @@ a fallback for users who prefer it — this should be additive, not a
 replacement that forces every date through the picker.
 
 **Acceptance criteria:**
-- [ ] A calendar picker can be opened from any existing date `Input` and
+- [x] A calendar picker can be opened from any existing date `Input` and
       set that field's value on selection.
-- [ ] Typing an ISO date directly still works without opening the picker.
-- [ ] Picker defaults to the field's current value (or today, if empty) and
+- [x] Typing an ISO date directly still works without opening the picker.
+- [x] Picker defaults to the field's current value (or today, if empty) and
       supports day/month navigation via keys.
-- [ ] Test covering picker-driven date selection produces the same
+- [x] Test covering picker-driven date selection produces the same
       `YYYY-MM-DD` string a direct type would have.
+
+**Implementation note:** delivered as reusable `DateInput`/`DateRangeInput`
+widgets (`src/beancount_tui/widgets/date_input.py`) plus a `DatePickerScreen`
+modal, opened via `ctrl+g` (`ctrl+p` was already claimed by Textual's
+built-in command palette, which takes priority over widget-local
+bindings). Adopted by `TransactionForm`'s date and recurring-until fields,
+`BudgetForm`'s date field, the as-of-date reports (`BalanceSheetScreen`,
+`HoldingsScreen`, `TrialBalanceScreen`), the `START..END` period reports
+(`BudgetScreen`, `ForecastScreen`, `IncomeStatementScreen`), and
+`FilterBar`. `DirectiveForm` has no discrete date `Input` to adopt it on —
+every directive type it handles (including the ones with an inline date,
+e.g. `balance`/`pad`) is edited as one raw source-text blob in a
+`TextArea`, by design, so there is no separate field to attach a picker
+to; that stays out of scope here rather than being force-fitted.
 
 ---
 
