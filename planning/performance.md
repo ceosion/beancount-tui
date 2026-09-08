@@ -134,7 +134,7 @@ cite as its "before."
 
 ### PERF-02: Cache `Ledger.root_account()`/realization
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** PERF-01
 - **Effort:** 1h
 
@@ -148,14 +148,77 @@ Cache the realized tree the same way `_price_map_cached` already does
 ledger state reuse one `realize()` pass instead of repeating it.
 
 **Acceptance criteria:**
-- [ ] `root_account()` returns a cached result across repeated calls
+- [x] `root_account()` returns a cached result across repeated calls
       within the same load, invalidated correctly on reload/write.
-- [ ] `action_balance_directive`/`action_pad_and_verify` no longer trigger
+- [x] `action_balance_directive`/`action_pad_and_verify` no longer trigger
       extra `realize()` passes beyond what `refresh_views` already did.
-- [ ] Test covering: cache hit on repeated calls, cache invalidation after
+- [x] Test covering: cache hit on repeated calls, cache invalidation after
       `reload()`.
-- [ ] `PERF-01`'s benchmark shows a measurable improvement for actions
+- [x] `PERF-01`'s benchmark shows a measurable improvement for actions
       that previously triggered multiple realizations.
+
+**Implementation notes:** Added a new `_root_account` dataclass field
+(`realization.RealAccount | None`, `repr=False, compare=False`), mirroring
+`_price_map`'s exact shape and cache-until-reload contract. `root_account()`
+now returns `self._root_account` if already populated, otherwise computes
+`realization.realize(self._actual_entries)` once and stores it before
+returning. `reload()` resets `self._root_account = None` right alongside
+its existing `self._price_map = None` reset -- the only place `_price_map`
+is invalidated, so it's the only place that needed mirroring.
+
+Audited every path that mutates `self.entries`/`self._actual_entries`
+(grepped `src/beancount_tui/*.py` for direct entries mutation and for
+every `self.ledger.reload()` call site in `app.py`): every write flow
+(`action_balance_directive`, `action_pad_and_verify`, `action_undo`,
+`action_redo`, `action_reload`, `_check_external_changes`) writes to disk
+via `append_entry`/`Path.write_text` and then calls `self.ledger.reload()`
+-- there is no code path that mutates `self.entries` directly without
+going through `reload()`. So invalidating only in `reload()` is complete,
+matching `_price_map`'s existing invalidation surface exactly (no
+deviation from the `_price_map_cached` pattern was needed).
+
+Verified `action_balance_directive`/`action_pad_and_verify`: both call
+`realization.get(self.ledger.root_account(), account)` once each, and
+`refresh_views()` (which runs immediately beforehand, driven by account
+selection / the screen render loop) also calls `self.ledger.root_account()`
+once. All three now share one cached tree per ledger state instead of each
+triggering its own `realize()` pass.
+
+Added `tests/test_ledger.py::test_root_account_caches_realize_across_calls`
+(monkeypatches `beancount.core.realization.realize` with a call-counting
+wrapper, asserts exactly 1 call across 3 `root_account()` calls, and that
+all 3 results are the identical object) and
+`::test_root_account_cache_invalidated_by_reload` (asserts a `reload()`
+between calls forces a second `realize()` call and returns a distinct
+object, then that the cache resumes hitting afterward).
+
+**Measured improvement:** Added `benchmarks/bench_perf02.py` (same
+throwaway-tempdir convention as `bench_perf01.py`), which times, on the
+same synthetic ledger: 3 independent uncached `realization.realize()`
+calls (the exact pre-PERF-02 behavior) vs. 3 calls to the real, now-cached
+`Ledger.root_account()` on one `Ledger` instance (the exact post-PERF-02
+behavior, matching `refresh_views` + `action_balance_directive` +
+`action_pad_and_verify`'s combined call pattern). Run via
+`uv run python benchmarks/bench_perf02.py [-n NUM_TRANSACTIONS]`.
+
+Results on this machine (2026-09-07):
+
+| num_transactions | before (3x uncached realize) | after (3x cached root_account) | saving |
+|---|---|---|---|
+| 20,000 | 0.1443s | 0.0326s | 0.1117s (77.4%) |
+| 50,000 | 0.4169s | 0.1468s | 0.2701s (64.8%) |
+
+Consistent with PERF-01's baseline estimate (~0.03-0.05s/call, ~0.1-0.15s
+per multi-call action at 20k transactions): the "after" number is
+dominated by the single first (real) `realize()` call, with the 2nd/3rd
+calls now effectively free cache hits — confirmed directly rather than
+left as a hand-waved estimate.
+
+Full suite (`uv run pytest -q`, 361 tests -- 359 + 2 new for this task):
+all passing, 91.63s wall-clock (no regression vs. PERF-01's 89.98s
+baseline; the ~1.6s difference is normal run-to-run variance, not
+attributable to this change since it only adds a `None` check + attribute
+read on an existing hot path). `uv run ruff check .` passes clean.
 
 ---
 
