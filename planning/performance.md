@@ -194,7 +194,7 @@ than stacking concurrent reloads against the same `Ledger` instance.
 
 ### PERF-04: Incremental TransactionTable updates
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** PERF-01
 - **Effort:** 2h
 
@@ -211,14 +211,112 @@ measured against `PERF-01`'s baseline instead of assumed to cost the same
 as before.
 
 **Acceptance criteria:**
-- [ ] Toggling sort order on an unchanged filtered/selected entry set does
+- [x] Toggling sort order on an unchanged filtered/selected entry set does
       not perform a full `clear()`+rebuild (or, if Textual's `DataTable`
       genuinely has no cheaper path in the pinned version, this is
       documented as a hard constraint rather than silently left
       unaddressed).
-- [ ] Existing sort/filter/account-selection behavior and tests are
+- [x] Existing sort/filter/account-selection behavior and tests are
       unaffected.
-- [ ] `PERF-01`'s benchmark shows measurable improvement for the
+- [x] `PERF-01`'s benchmark shows measurable improvement for the
       sort-toggle case on a large ledger.
-- [ ] Test covering sort-toggle behavior still produces correct row
+- [x] Test covering sort-toggle behavior still produces correct row
       order/content after the optimization.
+
+**Implementation notes:**
+
+Investigated Textual 8.2.8 (the version actually installed under the
+`textual>=0.80.0` pin) for a `move_row`-style reordering API on
+`DataTable`:
+
+- No public `move_row` (or similarly-named) method exists.
+- `DataTable.sort(*columns, key=None, reverse=False)` is the one public
+  reordering method, and it *is* cheap — internally it just rebuilds the
+  private `_row_locations` two-way map (row key <-> display index) and
+  leaves `_data` (the actual rendered cell content, populated by
+  `add_row`) untouched. But its `key` callable only ever receives
+  *rendered cell values* for a row (see `key_wrapper` in
+  `textual/widgets/_data_table.py`), never the row's backing domain
+  object. That can't reproduce this table's three sort orders correctly:
+  payee sort is case-insensitive but the Payee cell preserves case,
+  amount sort compares numeric `Decimal` magnitude but the Amount cell is
+  a formatted currency string (`"1,200.00 USD"` sorts before `"200.00
+  USD"` lexicographically — wrong), and non-`Transaction` directives need
+  a synthetic zero amount that isn't in any cell at all. Using
+  `DataTable.sort()` as-is would have silently changed sort behavior for
+  2 of the table's 3 sort fields — unacceptable per this task's own
+  "existing behavior unaffected" criterion.
+- Per-row `remove_row` + `add_row` (the task's suggested fallback) was
+  also ruled out: `remove_row` does an O(n) rebuild of `_row_locations`
+  on every call (shifting every row's index), so reordering all N rows
+  that way is O(n²) — much worse than the existing `clear()`+rebuild for
+  any ledger large enough to matter.
+
+Given that, `TransactionTable._reorder_rows` (in
+`src/beancount_tui/widgets/transaction_table.py`) reaches around the
+public `sort()` wrapper and does exactly what `sort()` does internally —
+replace `self._row_locations` with a freshly-built `TwoWayDict` mapping
+each existing row key to its new display index — but keyed by this
+table's own entry-aware sort functions (`_SORT_KEYS`) instead of
+rendered-cell values. This needed importing the private
+`textual._two_way_dict.TwoWayDict` (the same private module
+`_data_table.py` itself imports it from), documented at the import site
+in `transaction_table.py`. Row content (`_data`) is never touched, so
+this skips the expensive part of a rebuild entirely: no `_entry_row()`
+re-computation, no new `Row`/cell objects, no `add_row` bookkeeping per
+row.
+
+`update_entries` now dispatches on `TransactionTable._can_reorder_in_place`,
+which takes the fast (`_reorder_rows`) path only when *all* of the
+following hold, falling back to the original full `_rebuild_rows` path
+(`clear()` + `add_row` per entry) otherwise:
+- the incoming `entries` are exactly the same *set* of entry objects
+  already backing the table's rows (compared by `id()`, via a
+  `dict[id(entry) -> row_key]` populated at the last full rebuild) —
+  this is what makes it safe for the sort-toggle call site
+  (`_set_sort`/`action_cycle_sort`, which literally pass `self.shown`
+  back in) while still falling back correctly for a filter keystroke or
+  account-selection change (a genuinely different, freshly-computed
+  entry list from `app._visible_entries()`);
+- `running_balances`/`cleared_balances` are the identical objects already
+  set (`is` comparison) — true only when the caller didn't recompute
+  them, which in practice is only the sort-toggle call sites;
+- and the sort change won't flip whether the Balance/Cleared Balance
+  columns are shown (`_should_show_balance_columns()` unchanged) — since
+  that changes the per-row column count, which a pure reorder can't
+  express safely. This one rare edge case (crossing from a date-based
+  sort to payee/amount or back, on a leaf account with running balances)
+  still takes the full-rebuild path; `test_balance_columns_hidden_for_payee_and_amount_sort`
+  already exercises exactly that transition and continues to pass.
+
+New test: `test_sort_toggle_reorders_rows_in_place` in `tests/test_app.py`
+monkeypatches `TransactionTable._rebuild_rows` to record calls, performs
+two header-click sort toggles (date ascending, then date descending —
+the latter genuinely reverses row order), and asserts both that the
+resulting row order/content is correct (`table.shown` and every rendered
+row via `get_row_at`) *and* that `_rebuild_rows` was never called and
+each entry's row key is unchanged — i.e., the optimization actually fired
+rather than silently falling back.
+
+**Benchmark (this machine, `uv run python benchmarks/bench_perf01.py`,
+added `PERF-04 sort-toggle` lines time a header-click sort toggle on the
+already-shown entry set two ways: the real optimized path, and — for a
+direct before/after — an explicit call to the old-style `_rebuild_rows`
+on the identical data):**
+
+At 20,000 transactions (20,017 rows):
+
+| | Before (`clear()`+rebuild) | After (reorder-in-place) | Speedup |
+|---|---|---|---|
+| Sort toggle | 0.192s | 0.005s | ~38x |
+
+At 50,000 transactions (50,017 rows):
+
+| | Before (`clear()`+rebuild) | After (reorder-in-place) | Speedup |
+|---|---|---|---|
+| Sort toggle | 0.560s | 0.014s | ~40x |
+
+The "after" numbers scale far more gently with row count than the
+"before" ones (roughly O(n log n) dict-rebuild cost vs. `add_row`'s
+per-row rendering work), so the improvement widens at larger ledger
+sizes rather than narrowing.

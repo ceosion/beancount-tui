@@ -3846,6 +3846,54 @@ async def test_sort_key_cycles_field_and_direction(ledger_path):
         assert table._sort_field == "date" and table._sort_reverse is False
 
 
+async def test_sort_toggle_reorders_rows_in_place(ledger_path, monkeypatch):
+    """PERF-04: toggling sort on an unchanged entry set should reorder the
+    table's existing rows rather than doing a full ``clear()`` + rebuild --
+    and, either way, must still produce correct row order/content."""
+    from beancount_tui.widgets.transaction_table import TransactionTable as TT
+
+    rebuild_calls = []
+    original_rebuild_rows = TT._rebuild_rows
+
+    def spy_rebuild_rows(self, *args, **kwargs):
+        rebuild_calls.append(1)
+        return original_rebuild_rows(self, *args, **kwargs)
+
+    monkeypatch.setattr(TT, "_rebuild_rows", spy_rebuild_rows)
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        table.focus()
+        await pilot.pause()
+
+        dates = [str(e.date) for e in table.shown]
+        row_key_by_id_before = dict(table._row_key_by_id)
+        assert row_key_by_id_before  # sanity: rows exist
+
+        rebuild_calls.clear()  # ignore whatever rebuilds happened on startup
+
+        await pilot.press("o")  # date ascending (same order as the untouched default)
+        await pilot.pause()
+        await pilot.press("o")  # date descending -- genuinely reorders the rows
+        await pilot.pause()
+
+        assert table._sort_field == "date" and table._sort_reverse is True
+
+        # Correct order and content: both ``shown`` and the actual rendered
+        # rows agree with a plain date-descending sort.
+        assert [str(e.date) for e in table.shown] == sorted(dates, reverse=True)
+        for i in range(table.row_count):
+            assert str(table.get_row_at(i)[0]) == str(table.shown[i].date)
+
+        # And it got there without a single full clear()+rebuild -- row
+        # identity (the row key assigned to each entry) is unchanged, only
+        # each row's *position* moved.
+        assert rebuild_calls == []
+        assert table._row_key_by_id == row_key_by_id_before
+
+
 async def test_sort_handles_non_transaction_directives_without_crashing(ledger_path):
     app = BeancountTUI(ledger_path)
     async with app.run_test() as pilot:

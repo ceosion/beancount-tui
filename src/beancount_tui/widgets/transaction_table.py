@@ -18,6 +18,25 @@ from beancount.core.inventory import Inventory
 from rich.text import Text
 from textual.widgets import DataTable
 
+# PERF-04: ``DataTable`` (textual==8.2.8, pinned via pyproject.toml's
+# "textual>=0.80.0") has no public ``move_row``-style API, and its one public
+# reordering method -- ``DataTable.sort(columns=..., key=...)`` -- only ever
+# hands the key function *rendered cell values* for the row (see its
+# ``key_wrapper`` closure in ``textual/widgets/_data_table.py``), never the
+# row's original domain object. That can't reproduce this table's sort
+# semantics: payee sort is case-insensitive but the Payee cell preserves
+# case, amount sort is numeric (``Decimal``) but the Amount cell is a
+# formatted currency string ("1,200.00 USD" sorts before "200.00 USD"
+# lexicographically), and non-Transaction directives need a synthetic zero
+# amount that isn't in any cell at all. So a genuine reorder-in-place has to
+# go around ``sort()`` and touch what it touches internally: swap the
+# ``_row_locations`` two-way map (row key -> display index) for a new one,
+# leaving ``_data`` (the per-row rendered cell content, the expensive part of
+# ``add_row``) completely untouched. That's exactly what ``sort()`` itself
+# does (see its source), so this reaches for the same private map rather
+# than reimplementing something riskier of its own.
+from textual._two_way_dict import TwoWayDict
+
 from beancount_tui.ledger import (
     format_inventory,
     has_user_metadata,
@@ -109,6 +128,12 @@ class TransactionTable(DataTable):
         self._running_balances: dict[int, Inventory] | None = None
         self._cleared_balances: dict[int, Inventory] | None = None
         self._balance_columns_visible: bool = False
+        # PERF-04: maps id(entry) -> the row key it was given at the last
+        # full rebuild, so a later call that only reorders the *same* set of
+        # entries (a sort toggle) can look up each entry's existing row
+        # instead of clearing and re-adding every row. Reset (and
+        # repopulated) on every full rebuild; see ``_can_reorder_in_place``.
+        self._row_key_by_id: dict[int, str] = {}
 
     def on_mount(self) -> None:
         self.add_columns("Date", "Flag", "Payee", "Narration", "Amount")
@@ -119,16 +144,76 @@ class TransactionTable(DataTable):
         running_balances: dict[int, Inventory] | None = None,
         cleared_balances: dict[int, Inventory] | None = None,
     ) -> None:
+        if self._can_reorder_in_place(entries, running_balances, cleared_balances):
+            self._reorder_rows(entries)
+            return
+        self._rebuild_rows(entries, running_balances, cleared_balances)
+
+    def _can_reorder_in_place(
+        self,
+        entries: list[data.Directive],
+        running_balances: dict[int, Inventory] | None,
+        cleared_balances: dict[int, Inventory] | None,
+    ) -> bool:
+        """Whether ``entries`` is the exact same *set* of entries already
+        backing the table's rows (PERF-04's "sort toggle" case), so
+        ``update_entries`` can reorder existing rows instead of a full
+        ``clear()`` + rebuild.
+
+        Deliberately conservative: any mismatch (a genuinely different
+        entry set, a change to the running-balance dicts, or a sort change
+        that would flip whether the Balance columns are shown -- which
+        changes the column count per row, something a pure reorder can't
+        express) falls back to a full rebuild rather than risk stale or
+        malformed rows.
+        """
+        if not self._row_key_by_id:
+            return False
+        if running_balances is not self._running_balances:
+            return False
+        if cleared_balances is not self._cleared_balances:
+            return False
+        if len(entries) != len(self._row_key_by_id):
+            return False
+        if any(id(entry) not in self._row_key_by_id for entry in entries):
+            return False
+        return self._should_show_balance_columns() == self._balance_columns_visible
+
+    def _reorder_rows(self, entries: list[data.Directive]) -> None:
+        """Apply the current sort to ``entries`` (the same entries already
+        shown) by moving existing rows to new positions, without touching
+        any row's rendered content. See the ``TwoWayDict`` import comment
+        above for why this is the genuine cheaper path here."""
+        self.shown = self._sorted(entries)
+        new_row_locations = {
+            self._row_key_by_id[id(entry)]: new_index
+            for new_index, entry in enumerate(self.shown)
+        }
+        self._row_locations = TwoWayDict(new_row_locations)
+        self._update_count += 1
+        self.refresh()
+        if self.shown:
+            self.move_cursor(row=len(self.shown) - 1)
+
+    def _rebuild_rows(
+        self,
+        entries: list[data.Directive],
+        running_balances: dict[int, Inventory] | None,
+        cleared_balances: dict[int, Inventory] | None,
+    ) -> None:
         self.clear()
         self._running_balances = running_balances
         self._cleared_balances = cleared_balances
         self.shown = self._sorted(entries)
         self._sync_balance_columns()
+        self._row_key_by_id = {}
         for index, entry in enumerate(self.shown):
             row = _entry_row(entry)
             if self._balance_columns_visible:
                 row = row + self._balance_cells(entry)
-            self.add_row(*row, key=str(index))
+            key = str(index)
+            self.add_row(*row, key=key)
+            self._row_key_by_id[id(entry)] = key
         if self.shown:
             self.move_cursor(row=len(self.shown) - 1)
 
