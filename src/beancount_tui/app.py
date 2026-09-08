@@ -57,6 +57,13 @@ from beancount_tui.widgets.transaction_form import TransactionForm, TransactionF
 from beancount_tui.widgets.transaction_table import TransactionTable
 from beancount_tui.widgets.trial_balance import TrialBalanceScreen
 
+# PERF-03: appended to `App.sub_title` (already used to show the ledger
+# path -- see `on_mount`) while a background reload is in flight, so the
+# always-visible `Header` widget doubles as the "reload in progress"
+# indicator without any new widget/CSS. Restored to the bare path once the
+# reload finishes (or fails).
+_RELOADING_SUFFIX = "  ⏳ reloading…"
+
 # Minimal valid source text for each creatable non-transaction directive type,
 # ready for the user to fill in the placeholder account(s)/amount.
 #
@@ -269,6 +276,16 @@ class BeancountTUI(App):
         self._watched_mtimes = self.ledger.file_mtimes()
         # Bounded, chronological undo/redo history across every file touched.
         self._undo_manager = UndoManager()
+        # PERF-03: guards every reload path (`action_reload`, `action_undo`/
+        # `action_redo`, the polling `_check_external_changes`) against
+        # stacking a second background reload on top of one already in
+        # flight -- see `_start_reload`. `_pending_reload_notify` carries
+        # the completion message (if any) from whichever call kicked off
+        # the in-flight reload through to `_finish_reload`, since the
+        # worker itself has no way to know which of the four call sites
+        # started it.
+        self._reload_in_progress: bool = False
+        self._pending_reload_notify: str | None = None
         # CONFIG-03: the theme named in the config file (if any), applied
         # once on mount -- see `_apply_startup_theme`. `_config_path` is
         # whichever config file was actually resolved for this run (the
@@ -541,10 +558,7 @@ class BeancountTUI(App):
         path, content = entry
         self._undo_manager.push_redo(path, path.read_text(encoding="utf-8"))
         path.write_text(content, encoding="utf-8")
-        self.ledger.reload()
-        self._watched_mtimes = self.ledger.file_mtimes()
-        self.refresh_views()
-        self.notify(f"Undid last change to {path.name}.")
+        self._start_reload(notify_message=f"Undid last change to {path.name}.")
 
     def action_redo(self) -> None:
         entry = self._undo_manager.pop_redo()
@@ -554,28 +568,123 @@ class BeancountTUI(App):
         path, content = entry
         self._undo_manager.push_undo(path, path.read_text(encoding="utf-8"))
         path.write_text(content, encoding="utf-8")
-        self.ledger.reload()
-        self._watched_mtimes = self.ledger.file_mtimes()
-        self.refresh_views()
-        self.notify(f"Redid last change to {path.name}.")
+        self._start_reload(notify_message=f"Redid last change to {path.name}.")
 
     def action_reload(self) -> None:
-        self.ledger.reload()
+        self._start_reload(notify_message="Ledger reloaded.")
+
+    def _start_reload(self, notify_message: str | None = None) -> None:
+        """Kick off a background reload (``PERF-03``), coalescing with one
+        already in flight rather than stacking a second concurrent
+        ``Ledger.reload_data()`` call.
+
+        Every reload path in the app -- ``action_reload`` (the ``r`` key
+        and every write-commit closure that calls it), ``action_undo``/
+        ``action_redo``, and the polling ``_check_external_changes`` --
+        routes through here, so the in-flight guard and the "reloading"
+        indicator only need to live in one place.
+
+        A reload triggered while ``self._reload_in_progress`` is already
+        ``True`` is silently dropped: the in-flight reload will finish and
+        pick up whatever's on disk at the moment it started reading, and
+        the next tick of ``_check_external_changes`` (or the next
+        keypress) will notice if disk state has moved again since. This is
+        the "simple in-flight boolean flag guard" the task calls out as
+        sufficient, rather than a queue that replays every dropped
+        request.
+
+        ``notify_message``, if given, is shown via ``self.notify`` once
+        the reload actually completes (not immediately) -- since the
+        reload itself is now asynchronous, the message has to wait for
+        ``_finish_reload`` rather than firing right after this call
+        returns.
+        """
+        if self._reload_in_progress:
+            return
+        self._reload_in_progress = True
+        self._pending_reload_notify = notify_message
+        self.sub_title = str(self.ledger.path) + _RELOADING_SUFFIX
+        self.run_worker(self._reload_worker, thread=True, exclusive=False)
+
+    def _reload_worker(self) -> None:
+        """Runs on a background thread (``run_worker(..., thread=True)``):
+        the actual CPU-bound ``loader.load_file`` reparse (via
+        ``Ledger.reload_data``), kept off the UI thread so the app stays
+        responsive (cursor movement, scrolling, etc.) for the whole
+        duration of a large-ledger reload.
+
+        Thread-mode, not asyncio mode, because ``beancount.loader`` is
+        synchronous CPU-bound code with no ``await`` points of its own --
+        an asyncio worker would just block the event loop exactly like the
+        old inline call did.
+
+        Only ever reads ``self.ledger.path`` (via ``reload_data``, which
+        is itself read-only with respect to ``self.ledger``) -- it never
+        mutates ``self.ledger`` or touches any widget directly, since
+        those aren't safe to touch off the UI thread. The result is handed
+        back via ``call_from_thread``, which schedules ``_finish_reload``
+        to run on the main/UI thread, where mutating ``self.ledger`` and
+        the widgets is safe.
+        """
+        try:
+            loaded = self.ledger.reload_data()
+        except Exception as exc:  # noqa: BLE001 - see docstring: must not
+            # crash the app or vanish silently off a background thread.
+            # `Ledger.reload_data` doesn't normally raise (LANG-13 already
+            # turns load-time failures, including a misbehaving plugin's
+            # `sys.exit()`, into `errors` entries instead), but an
+            # unexpected exception here (e.g. the file disappearing
+            # mid-read) must still degrade gracefully rather than take the
+            # whole app down.
+            self.call_from_thread(self._reload_failed, exc)
+            return
+        self.call_from_thread(self._finish_reload, loaded)
+
+    def _finish_reload(self, loaded: tuple[list, list, dict]) -> None:
+        """Main-thread completion callback for ``_reload_worker``, invoked
+        via ``call_from_thread``: applies the freshly loaded data to
+        ``self.ledger``, refreshes the views, and clears the in-flight
+        guard/indicator so a subsequent reload can proceed.
+        """
+        self.ledger.apply_reload(loaded)
         self._watched_mtimes = self.ledger.file_mtimes()
         self.refresh_views()
-        self.notify("Ledger reloaded.")
+        self._clear_reload_indicator()
+        message, self._pending_reload_notify = self._pending_reload_notify, None
+        if message:
+            self.notify(message)
+
+    def _reload_failed(self, exc: BaseException) -> None:
+        """Main-thread completion callback for a ``_reload_worker`` that
+        raised -- clears the in-flight guard/indicator (without touching
+        ``self.ledger``, which is untouched since ``reload_data`` never
+        got as far as returning) and surfaces the failure instead of the
+        pending success message."""
+        self._clear_reload_indicator()
+        self._pending_reload_notify = None
+        self.notify(f"Reload failed: {exc}", severity="error")
+
+    def _clear_reload_indicator(self) -> None:
+        self.sub_title = str(self.ledger.path)
+        self._reload_in_progress = False
 
     def _check_external_changes(self) -> None:
         # Leave the ledger alone while a modal (form/dialog) is open: a reload
         # under an in-progress edit would let it write back to stale locations.
         if len(self.screen_stack) > 1:
             return
+        # PERF-03: also leave it alone while a previous reload (from this
+        # same timer, a keypress, or a write-commit) is still in flight --
+        # otherwise a slow reload on a large ledger could still be running
+        # when the next `set_interval` tick fires and would stack a second
+        # concurrent `Ledger.reload_data()` call against the same
+        # not-thread-safe-for-concurrent-reload `Ledger` instance.
+        if self._reload_in_progress:
+            return
         current = self.ledger.file_mtimes()
         if current != self._watched_mtimes:
-            self.ledger.reload()
-            self._watched_mtimes = self.ledger.file_mtimes()
-            self.refresh_views()
-            self.notify("Ledger changed on disk; reloaded.")
+            self._start_reload(notify_message="Ledger changed on disk; reloaded.")
+
 
     def _save_transaction(
         self,

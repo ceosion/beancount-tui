@@ -1,6 +1,7 @@
 """End-to-end smoke tests driving the Textual app."""
 
 import datetime
+import time
 from pathlib import Path
 
 from beancount.core import data
@@ -2635,6 +2636,101 @@ async def test_no_auto_reload_while_modal_open(ledger_path):
         await pilot.pause(0.5)
         # ...and it happens once the form closes.
         assert app.query_one(TransactionTable).row_count == 7
+
+
+def _make_slow_reload_data(monkeypatch, delay=0.3, call_counter=None):
+    """PERF-03 test helper: monkeypatches `Ledger.reload_data` to sleep
+    for `delay` seconds (a real, GIL-releasing `time.sleep`, since the
+    method now runs on a worker thread) before doing the real reparse.
+
+    Gives tests a deterministic window in which a reload is reliably
+    still in flight, instead of relying on real-ledger parse timing
+    (flaky) or a fixed sleep with no visibility into whether it actually
+    ran (`call_counter`, if given, is incremented once per call so a test
+    can assert exactly how many real reloads happened).
+    """
+    original_reload_data = Ledger.reload_data
+
+    def slow_reload_data(self):
+        if call_counter is not None:
+            call_counter.append(None)
+        time.sleep(delay)
+        return original_reload_data(self)
+
+    monkeypatch.setattr(Ledger, "reload_data", slow_reload_data)
+
+
+async def test_reload_completes_and_updates_ui_without_blocking(ledger_path, monkeypatch):
+    """PERF-03: a background reload (triggered here via the `r` key)
+    completes and applies its result to the UI, and -- the actual proof
+    that `loader.load_file` no longer runs inline on the UI thread -- an
+    unrelated action (cursor movement) is still processed while the
+    reload is in flight rather than the whole app freezing for its
+    duration."""
+    _make_slow_reload_data(monkeypatch, delay=0.4)
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        table = app.query_one(TransactionTable)
+        assert table.row_count == 6
+        table.focus()
+        table.move_cursor(row=0)
+        before_row = table.cursor_row
+
+        append_entry(ledger_path, EXTERNAL_TXN)
+        await pilot.press("r")
+        await pilot.pause()
+        # The worker's 0.4s sleep hasn't elapsed yet -- the reload is
+        # still running in the background.
+        assert app._reload_in_progress
+
+        # The UI thread is free to keep handling unrelated input right
+        # now, mid-reload.
+        await pilot.press("down")
+        await pilot.pause()
+        assert table.cursor_row == before_row + 1
+
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        assert not app._reload_in_progress
+        assert app.query_one(TransactionTable).row_count == 7
+        assert app.query_one(TransactionTable).shown[-1].payee == "External Editor"
+
+
+async def test_second_reload_trigger_while_in_flight_is_coalesced(ledger_path, monkeypatch):
+    """PERF-03: a reload triggered while one is already running (the user
+    mashing the reload key, here) is coalesced/ignored rather than
+    stacking a second concurrent `Ledger.reload_data()` call against the
+    same `Ledger` instance -- and doing so doesn't corrupt the resulting
+    state."""
+    calls: list[None] = []
+    _make_slow_reload_data(monkeypatch, delay=0.4, call_counter=calls)
+
+    app = BeancountTUI(ledger_path)
+    async with app.run_test() as pilot:
+        await pilot.pause()
+
+        await pilot.press("r")
+        await pilot.pause()
+        assert app._reload_in_progress
+
+        # Mash reload several more times while the first is still in flight.
+        for _ in range(3):
+            await pilot.press("r")
+        await pilot.pause()
+
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # Only the first keypress actually started a reload; the rest were
+        # dropped rather than queued/stacked.
+        assert len(calls) == 1
+        assert not app._reload_in_progress
+        # State came through the single completed reload cleanly -- no
+        # duplicated/corrupted rows from a second concurrent reload.
+        assert app.query_one(TransactionTable).row_count == 6
 
 
 async def test_income_statement_screen(ledger_path):

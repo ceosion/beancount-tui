@@ -506,12 +506,45 @@ class Ledger:
         ledger._parse_recurring_templates()
         return ledger
 
-    def reload(self) -> None:
-        self.entries, self.errors, self.options = self._load_file(self.path)
+    def reload_data(self) -> tuple[list, list, dict]:
+        """Compute a freshly parsed ``(entries, errors, options)`` for this
+        ledger's ``path``, without mutating ``self`` (``PERF-03``).
+
+        Read-only with respect to ``self`` -- it only reads ``self.path``,
+        an immutable ``Path`` set at construction -- so it's safe to call
+        from a background thread while the UI thread keeps reading
+        ``self.entries``/``self.errors``/``self.options`` concurrently.
+        Nothing on ``self`` changes until the result is handed to
+        :meth:`apply_reload`, which must run on whichever thread every
+        other read of ``self`` runs on (the UI thread, for
+        ``BeancountTUI``).
+        """
+        return self._load_file(self.path)
+
+    def apply_reload(self, data: tuple[list, list, dict]) -> None:
+        """Apply a :meth:`reload_data` result to ``self`` (``PERF-03``).
+
+        Must run on the same thread as every other reader of ``self``'s
+        attributes -- the UI thread, when driven from a background worker
+        (see ``BeancountTUI._finish_reload``) -- since this mutates
+        ``self.entries``/``self.errors``/``self.options`` in place.
+        """
+        self.entries, self.errors, self.options = data
         self._price_map = None
         self._root_account = None
         self._parse_budgets()
         self._parse_recurring_templates()
+
+    def reload(self) -> None:
+        """Synchronous reload: :meth:`reload_data` then :meth:`apply_reload`,
+        both on the calling thread.
+
+        Kept as the simple, blocking entry point for callers that don't
+        need ``PERF-03``'s background-worker split (direct ``Ledger`` use
+        in tests/scripts) -- ``BeancountTUI`` itself no longer calls this
+        directly; see ``BeancountTUI._reload_worker``/``_finish_reload``.
+        """
+        self.apply_reload(self.reload_data())
 
     @staticmethod
     def _load_file(path: Path) -> tuple[list, list, dict]:
