@@ -161,7 +161,7 @@ ledger state reuse one `realize()` pass instead of repeating it.
 
 ### PERF-03: Move ledger load/reload off the UI thread
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** PERF-01
 - **Effort:** 2h
 
@@ -179,18 +179,132 @@ before a slow prior reload finishes) should be coalesced/ignored rather
 than stacking concurrent reloads against the same `Ledger` instance.
 
 **Acceptance criteria:**
-- [ ] The UI remains responsive (e.g. cursor movement, scrolling) while a
+- [x] The UI remains responsive (e.g. cursor movement, scrolling) while a
       large ledger reloads in the background.
-- [ ] A visible indicator shows a reload is in progress.
-- [ ] A reload triggered while one is already running doesn't stack/race
+- [x] A visible indicator shows a reload is in progress.
+- [x] A reload triggered while one is already running doesn't stack/race
       — it's coalesced or ignored.
-- [ ] Test covering: reload completes and updates the UI correctly, and
+- [x] Test covering: reload completes and updates the UI correctly, and
       that a rapid second trigger during an in-flight reload doesn't
       corrupt state.
-- [ ] `PERF-01`'s benchmark demonstrates the UI thread is no longer
+- [x] `PERF-01`'s benchmark demonstrates the UI thread is no longer
       blocked for the load duration.
 
+**Implementation notes:**
+
+`Ledger.reload()` (`src/beancount_tui/ledger.py`) is split into two
+pieces: `reload_data()` — a pure, read-only-w.r.t.-`self` call to
+`Ledger._load_file(self.path)` that does the actual CPU-bound
+`loader.load_file` reparse and returns `(entries, errors, options)`
+without touching `self` at all — and `apply_reload(data)`, which takes
+that result and does the (cheap) in-place mutation `reload()` used to do
+directly: assigning `self.entries`/`self.errors`/`self.options`,
+invalidating `_price_map`, and re-parsing budgets/recurring templates.
+`reload()` itself is kept as `apply_reload(reload_data())` in one call,
+so any caller that doesn't care about threading (direct `Ledger` use in
+tests/scripts) is unaffected.
+
+`BeancountTUI` (`src/beancount_tui/app.py`) never calls `Ledger.reload()`
+directly any more. All four reload call sites —
+`action_reload`, `action_undo`, `action_redo`, and
+`_check_external_changes` — now go through one shared entry point,
+`_start_reload(notify_message=...)`:
+
+- `run_worker(self._reload_worker, thread=True, exclusive=False)` — real
+  **thread-mode** (not asyncio mode), since `beancount.loader` is
+  synchronous CPU-bound code with no `await` points; an asyncio worker
+  would still block the event loop exactly like the old inline call did.
+- `_reload_worker` (runs on the worker thread) calls only
+  `self.ledger.reload_data()` — it never mutates `self.ledger` or touches
+  any widget, since that's only safe from the main thread. It hands the
+  result back to the main thread via `self.call_from_thread(self._finish_reload, loaded)`
+  (Textual's documented safe way for a thread worker to call back into
+  UI-mutating code) — or, if `reload_data()` unexpectedly raises,
+  `call_from_thread(self._reload_failed, exc)` so a background-thread
+  exception degrades into an error toast instead of vanishing silently or
+  crashing the app.
+- `_finish_reload` (runs on the main thread) calls
+  `self.ledger.apply_reload(loaded)`, refreshes `_watched_mtimes`, calls
+  `refresh_views()`, clears the in-flight indicator, and fires the
+  caller's `notify_message` (e.g. "Ledger reloaded.", "Undid last change
+  to ...", "Ledger changed on disk; reloaded.") — deferred until the
+  reload actually completes, since it's no longer synchronous with the
+  keypress/timer tick that requested it.
+
+**Indicator:** rather than adding a new widget/CSS, `_start_reload`
+appends a small "⏳ reloading…" suffix to `self.sub_title` (already used
+to show the ledger path, in the always-visible `Header`), restoring the
+bare path in `_finish_reload`/`_reload_failed`. This matches the "reuse
+an existing status area" option from the task over adding a new widget,
+since `Header`'s title bar is the one thing already visible across every
+screen state.
+
+**Reentrancy:** a single boolean, `self._reload_in_progress`, set the
+instant `_start_reload` decides to actually launch a worker and cleared
+only in `_finish_reload`/`_reload_failed`. Every one of the four call
+sites either checks it directly (`_check_external_changes`) or goes
+through `_start_reload`, which checks it first and returns immediately
+(no-op) if a reload is already running — so a second `r` keypress, or
+the watch-interval timer firing again mid-reload, is dropped rather than
+queued or stacked against the same `Ledger` instance. All reads/writes of
+the flag happen on the main/UI thread only (both the four call sites and
+the `call_from_thread`-scheduled completion callbacks run there), so
+there's no race on the flag itself. This is deliberately the "simple
+in-flight boolean flag guard" the task calls sufficient, not a queue that
+replays dropped requests — a dropped trigger from `_check_external_changes`
+is harmless since the next timer tick re-checks mtimes against disk once
+the in-flight reload finishes.
+
+**Tests** (`tests/test_app.py`):
+- `test_reload_completes_and_updates_ui_without_blocking` — monkeypatches
+  `Ledger.reload_data` to `time.sleep(0.4)` before doing the real reparse
+  (a deterministic window, not real-timing-dependent), triggers a reload
+  via the `r` key, and asserts the reload is still `_reload_in_progress`
+  immediately after — then, **while it's still running**, presses `down`
+  and asserts the transaction table's cursor actually moved. This is the
+  direct proof for the "UI thread is no longer blocked" acceptance
+  criterion: an unrelated keypress is processed and changes visible state
+  while a reload is mid-flight, which is only possible because the parse
+  itself is off the UI thread. After `await app.workers.wait_for_complete()`,
+  asserts the reload did complete and the table reflects the externally
+  appended transaction.
+- `test_second_reload_trigger_while_in_flight_is_coalesced` — same slow
+  `reload_data` mock, but with a call counter. Presses `r` once, confirms
+  `_reload_in_progress`, then presses `r` three more times while still in
+  flight. After the worker completes, asserts `reload_data` was only
+  actually called once (the extra triggers were dropped, not stacked) and
+  that the resulting table state is exactly what one clean reload
+  produces (no corruption from a hypothetical second concurrent reload).
+
+**Benchmark / "UI thread no longer blocked" evidence:** `PERF-01`'s
+`benchmarks/bench_perf01.py` measures `Ledger.load`/`update_entries`/
+`update_accounts` in isolation and deliberately isn't a UI-thread-blocking
+benchmark — it wasn't extended for this task, per the process notes
+above, since `Ledger.load`/`reload_data`'s own duration is unchanged by
+this change (moving *where* the same work runs doesn't make the parse
+itself faster). Instead, the "no longer blocked" criterion is
+demonstrated the way the task allows: by the worker mechanism itself
+(`run_worker(..., thread=True)` genuinely hands the blocking call to a
+different OS thread, which is why `time.sleep()` in the mocked
+`reload_data` above doesn't stop `pilot.press("down")` from being
+processed) plus the passing
+`test_reload_completes_and_updates_ui_without_blocking` test above, which
+asserts exactly that behavior against a reload slow enough (0.4s, in the
+same ballpark as `PERF-01`'s real 20k-transaction baseline of ~0.4s) to
+make the point unambiguously rather than relying on incidental scheduling
+luck.
+
+**Deviations from spec:** none of substance. The task suggested either
+`@work(thread=True)` or `run_worker(..., thread=True)`; `run_worker` was
+used directly (rather than the `@work` decorator) since the worker needs
+to be started conditionally from inside `_start_reload`'s in-flight check
+rather than unconditionally every time an action method is called, which
+is more naturally expressed as an explicit `run_worker` call than via the
+decorator's automatic-worker-per-call-site pattern.
+
 ---
+
+
 
 ### PERF-04: Incremental TransactionTable updates
 
