@@ -484,6 +484,11 @@ class Ledger:
     options: dict = field(default_factory=dict)
     # Lazily built and cached; invalidated on reload. Not part of equality.
     _price_map: object = field(default=None, repr=False, compare=False)
+    # Lazily built and cached; invalidated on reload -- same pattern as
+    # ``_price_map`` above (see ``root_account``/``_root_account_cached``).
+    _root_account: realization.RealAccount | None = field(
+        default=None, repr=False, compare=False
+    )
     # Parsed eagerly at load/reload time (see ``_parse_budgets``), not part
     # of equality, since parsing appends to ``errors`` as a side effect and
     # that shouldn't happen more than once per load.
@@ -504,6 +509,7 @@ class Ledger:
     def reload(self) -> None:
         self.entries, self.errors, self.options = self._load_file(self.path)
         self._price_map = None
+        self._root_account = None
         self._parse_budgets()
         self._parse_recurring_templates()
 
@@ -1697,8 +1703,19 @@ class Ledger:
         ``#recurring`` template's postings don't skew sidebar balances —
         opens/closes/pads/etc. are all still included, only template
         transactions are excluded.
+
+        Built once and cached until the next :meth:`reload`, the same
+        cache-until-reload pattern ``_price_map_cached`` already uses for
+        price lookups (see ``_root_account``) -- ``realization.realize`` is
+        a full O(entries) pass, and this is called up to 3x per user action
+        today (``app.refresh_views``, ``action_balance_directive``,
+        ``action_pad_and_verify``) against the same, unchanged ledger
+        state, so only the first call in each such sequence should pay for
+        an actual ``realize()``.
         """
-        return realization.realize(self._actual_entries)
+        if self._root_account is None:
+            self._root_account = realization.realize(self._actual_entries)
+        return self._root_account
 
     def _price_map_cached(self):
         """The ledger's price map (from ``Price`` directives), built once and

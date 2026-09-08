@@ -700,6 +700,58 @@ def test_root_account_has_balances(ledger_path):
     assert amounts == {(Decimal("4098.45"), "USD")}
 
 
+def test_root_account_caches_realize_across_calls(ledger_path, monkeypatch):
+    """PERF-02: repeated ``root_account()`` calls within the same loaded
+    state must reuse one ``realization.realize()`` pass, not repeat it --
+    the same cache-until-reload contract ``_price_map_cached`` already
+    gives price lookups."""
+    ledger = Ledger.load(ledger_path)
+    call_count = 0
+    real_realize = realization.realize
+
+    def counting_realize(entries):
+        nonlocal call_count
+        call_count += 1
+        return real_realize(entries)
+
+    monkeypatch.setattr(realization, "realize", counting_realize)
+
+    first = ledger.root_account()
+    second = ledger.root_account()
+    third = ledger.root_account()
+
+    assert call_count == 1
+    assert first is second is third
+
+
+def test_root_account_cache_invalidated_by_reload(ledger_path, monkeypatch):
+    """A ``reload()`` must invalidate the cached realized tree, so the next
+    ``root_account()`` call recomputes it against the freshly loaded
+    entries rather than returning stale data."""
+    ledger = Ledger.load(ledger_path)
+    call_count = 0
+    real_realize = realization.realize
+
+    def counting_realize(entries):
+        nonlocal call_count
+        call_count += 1
+        return real_realize(entries)
+
+    monkeypatch.setattr(realization, "realize", counting_realize)
+
+    first = ledger.root_account()
+    assert call_count == 1
+
+    ledger.reload()
+    second = ledger.root_account()
+
+    assert call_count == 2
+    assert first is not second
+    # Cache hit again post-reload, until the next reload.
+    ledger.root_account()
+    assert call_count == 2
+
+
 def test_register_running_balance(ledger_path):
     ledger = Ledger.load(ledger_path)
     rows = ledger.register("Assets:Checking")
