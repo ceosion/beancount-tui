@@ -20,7 +20,7 @@ be faster."
 
 ### PERF-01: Large-ledger benchmark fixture
 
-- **Status:** todo
+- **Status:** done
 - **Depends on:** none
 - **Effort:** 1.5h
 
@@ -35,16 +35,100 @@ timing is too flaky for the regular suite) — covering: full `Ledger.load`,
 before any of `PERF-02`-`PERF-04` land.
 
 **Acceptance criteria:**
-- [ ] A generator produces a synthetic ledger of a configurable size (e.g.
+- [x] A generator produces a synthetic ledger of a configurable size (e.g.
       20,000+ transactions) that loads cleanly through the real Beancount
       parser.
-- [ ] Load, table-render, and tree-render timings are captured against
+- [x] Load, table-render, and tree-render timings are captured against
       the generated ledger.
-- [ ] Baseline numbers are documented (in the task/PR, not necessarily
+- [x] Baseline numbers are documented (in the task/PR, not necessarily
       committed as a file) for `PERF-02`-`PERF-04` to compare against.
-- [ ] Test/benchmark infrastructure runs without disproportionately
+- [x] Test/benchmark infrastructure runs without disproportionately
       slowing the default test run (keep large-ledger timing out of the
       fast/default suite if needed).
+
+**Implementation notes:** Went with the standalone-script option, not
+timing-asserting `pytest` tests — wall-clock thresholds for a 20k+-entry
+parse are exactly the kind of flaky-under-CI-load assertion the task
+description warns about, and a script keeps this fully out of the
+default `pytest -q` run (verified: default suite wall-clock is
+unchanged — see below — vs. adding a skip-by-default marker that could
+still be accidentally included).
+
+- `benchmarks/generate_large_ledger.py` — `generate_large_ledger(path,
+  num_transactions=20_000, ...)` writes a plain-text Beancount ledger:
+  a small realistic account tree (3 Asset, 1 Liability, 3 Income, 10
+  Expense leaf accounts), one `open` per account dated at the start of
+  a configurable date span (default 15 years), then `num_transactions`
+  balanced two-posting transactions (one leg's amount given, the other
+  elided so Beancount auto-balances it — the same convention
+  `tests/conftest.py`'s fixtures already use) with dates spread evenly
+  across the span and a weighted mix of transaction kinds (salary,
+  freelance, interest, rent, transfers, everyday expenses) so it reads
+  like real activity rather than one repeated template. Deterministic
+  via a fixed `seed` default, so repeated runs are comparable. No
+  synthetic shortcut bypasses the parser — the file is real Beancount
+  syntax loaded through `Ledger.load` -> `loader.load_file` like any
+  other ledger.
+- `benchmarks/bench_perf01.py` — generates a throwaway ledger under a
+  `tempfile.TemporaryDirectory()` (never touches
+  `examples/example.beancount` or any tracked fixture), then times, in
+  order: `Ledger.load`, `TransactionTable.update_entries(ledger.directives)`,
+  and `AccountTree.update_accounts(ledger.root_account(), ledger)`,
+  inside a real (headless, `run_test()`) Textual app — both widgets
+  touch app-level state (`DataTable.add_row`, `Tree.add`) and aren't
+  faithfully exercised unmounted. Asserts the generated ledger loaded
+  with zero errors and the expected transaction count, so a run also
+  double-checks the generator's "loads cleanly" acceptance criterion
+  every time it's invoked. Run via:
+  `uv run python benchmarks/bench_perf01.py [-n NUM_TRANSACTIONS]`.
+
+**Baseline (as of PERF-01, 2026-09-07, this machine):**
+
+Default `uv run pytest -q` run (359 tests, unaffected by this task since
+none of the above lives in `tests/`): **89.98s** before and after this
+change — no measurable regression.
+
+`uv run python benchmarks/bench_perf01.py -n 20000`:
+
+| Operation | Time | Notes |
+|---|---|---|
+| `generate_large_ledger` | 0.023s | fixture generation itself, not part of the "app" baseline |
+| `Ledger.load` | **0.408s** | 20,017 entries (20,000 txns + 17 opens), 0 errors |
+| `TransactionTable.update_entries` | **0.171s** | all 20,017 rows, full `clear()` + rebuild |
+| `AccountTree.update_accounts` | **~0.000s** | see note below |
+
+`uv run python benchmarks/bench_perf01.py -n 50000` (larger scale, to see trend):
+
+| Operation | Time |
+|---|---|
+| `Ledger.load` | **1.535s** (50,017 entries) |
+| `TransactionTable.update_entries` | **0.443s** (50,017 rows) |
+| `AccountTree.update_accounts` | **~0.000s** |
+
+Both `Ledger.load` and `TransactionTable.update_entries` scale
+roughly linearly with transaction count (as expected: a full re-parse
+and a full `clear()`+`add_row` rebuild each touch every entry).
+`AccountTree.update_accounts` stays flat regardless of transaction
+count in this fixture — it walks the *realized account tree*, whose
+node count is bounded by the number of distinct accounts (17 in this
+fixture), not the number of postings, so it's cheap by construction
+here. `PERF-04` targets `TransactionTable`'s rebuild cost, not
+`AccountTree`'s, which matches this: the account tree isn't the
+expensive rebuild path at this fixture's account-count scale, and a
+future benchmark run with a much wider (not just deeper) account tree
+would be a more meaningful stress test for `AccountTree` specifically
+if that ever becomes a target.
+
+Additional context for `PERF-02` (not one of the three named
+operations, but directly relevant to its "cache `root_account()`"
+scope): a single `ledger.root_account()` call (`realization.realize()`
+under the hood) on the 20,000-transaction ledger took **~0.03-0.05s**
+per call across 3 repeated calls with no caching — consistent with
+`realize()` doing real work every time rather than being dominated by
+one-time setup cost. At up to 3 calls per user action today (per this
+file's intro), that's roughly 0.1-0.15s of avoidable repeated work per
+action on a ledger this size — the concrete number `PERF-02` should
+cite as its "before."
 
 ---
 
